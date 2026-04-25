@@ -1,17 +1,17 @@
 :root {
-  --adcheck-ink: #12212d;
-  --adcheck-ink-soft: #4d6272;
-  --adcheck-panel: rgba(250, 247, 241, 0.96);
-  --adcheck-panel-strong: #fffdf7;
-  --adcheck-line: rgba(18, 33, 45, 0.12);
-  --adcheck-accent: #0d8f8a;
-  --adcheck-accent-deep: #0b6d72;
-  --adcheck-alert: #d85f34;
-  --adcheck-success: #1f8b4c;
-  --adcheck-danger: #bb3a28;
-  --adcheck-warning: #c97b19;
-  --adcheck-glow: rgba(13, 143, 138, 0.18);
-  --adcheck-shadow: 0 18px 40px rgba(24, 37, 49, 0.18);
+  --adcheck-ink: #1a1214;
+  --adcheck-ink-soft: #6b4f55;
+  --adcheck-panel: rgba(255, 248, 247, 0.96);
+  --adcheck-panel-strong: #fff8f7;
+  --adcheck-line: rgba(160, 30, 40, 0.1);
+  --adcheck-accent: #c0392b;
+  --adcheck-accent-deep: #96231a;
+  --adcheck-alert: #e05c2a;
+  --adcheck-success: #1f7a40;
+  --adcheck-danger: #c0392b;
+  --adcheck-warning: #b06a10;
+  --adcheck-glow: rgba(192, 57, 43, 0.18);
+  --adcheck-shadow: 0 18px 40px rgba(80, 10, 10, 0.18);
   --adcheck-radius: 20px;
   --adcheck-font-body: "Avenir Next", "Trebuchet MS", "Gill Sans", sans-serif;
   --adcheck-font-display: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
@@ -70,13 +70,13 @@
 
 .adcheck-widget {
   position: relative;
-  width: 360px;
-  max-width: min(360px, calc(100vw - 24px));
-  border: 1px solid rgba(255, 255, 255, 0.55);
+  width: 340px;
+  max-width: min(340px, calc(100vw - 24px));
+  border: 1px solid rgba(255, 200, 195, 0.55);
   border-radius: var(--adcheck-radius);
   background:
-    radial-gradient(circle at top left, rgba(13, 143, 138, 0.18), transparent 42%),
-    linear-gradient(180deg, rgba(255, 253, 247, 0.98), rgba(246, 241, 232, 0.98));
+    radial-gradient(circle at top left, rgba(192, 57, 43, 0.1), transparent 40%),
+    linear-gradient(180deg, rgba(255, 250, 249, 0.99), rgba(255, 242, 240, 0.99));
   box-shadow: var(--adcheck-shadow);
   backdrop-filter: blur(14px);
   overflow: visible;
@@ -102,8 +102,9 @@
   overscroll-behavior: contain;
   border-radius: var(--adcheck-radius);
   scrollbar-width: thin;
-  scrollbar-color: rgba(13, 143, 138, 0.35) transparent;
+  scrollbar-color: rgba(192, 57, 43, 0.25) transparent;
   transition: opacity 200ms ease, visibility 200ms ease;
+  user-select: text;
 }
 
 .adcheck-widget-shell::-webkit-scrollbar {
@@ -115,8 +116,12 @@
 }
 
 .adcheck-widget-shell::-webkit-scrollbar-thumb {
-  background: rgba(13, 143, 138, 0.3);
+  background: rgba(192, 57, 43, 0.25);
   border-radius: 999px;
+}
+
+.adcheck-widget-shell {
+  scrollbar-color: rgba(192, 57, 43, 0.25) transparent;
 }
 
 .adcheck-widget.is-collapsed .adcheck-widget-shell {
@@ -156,12 +161,12 @@
 
 .adcheck-widget-kicker,
 .adcheck-popup-kicker {
-  margin: 0 0 6px;
-  font-size: 11px;
+  margin: 0 0 4px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--adcheck-accent-deep);
+  color: var(--adcheck-accent);
 }
 
 .adcheck-widget-title-row,
@@ -194,22 +199,66 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 24px;
-  padding: 0 10px;
+  min-height: 22px;
+  padding: 0 9px;
   border-radius: 999px;
-  background: rgba(13, 143, 138, 0.12);
-  color: var(--adcheck-accent-deep);
-  font-size: 11px;
+  background: rgba(192, 57, 43, 0.1);
+  color: var(--adcheck-accent);
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
+  transition: background 160ms ease, color 160ms ease;
+  user-select: none;
 }
 
-.adcheck-widget-actions,
-.adcheck-popup-actions {
+.adcheck-badge.is-all-pass {
+  background: rgba(31, 122, 64, 0.12);
+  color: var(--adcheck-success);
+}
+
+.adcheck-result-label,
+.adcheck-result-detail {
+  user-select: text;
+}
+
+
+/* Widget header: left text block + right refresh icon only */
+.adcheck-widget-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
+  padding-bottom: 2px;
+}
+
+.adcheck-widget-header-left {
+  min-width: 0;
+  flex: 1;
+}
+
+/* ↻ Refresh icon button */
+.adcheck-refresh-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(192, 57, 43, 0.1);
+  color: var(--adcheck-accent);
+  font-size: 18px;
+  cursor: pointer;
+  transition: background 160ms ease, transform 320ms ease;
+  line-height: 1;
+  padding: 0;
+}
+
+.adcheck-refresh-btn:hover {
+  background: rgba(192, 57, 43, 0.18);
+  transform: rotate(180deg);
 }
 
 .adcheck-button,
@@ -224,17 +273,14 @@
 
 .adcheck-button,
 .adcheck-add-button {
-  min-height: 38px;
+  min-height: 36px;
   padding: 0 14px;
   border-radius: 999px;
   transition: transform 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
 }
 
 .adcheck-button:hover,
-.adcheck-add-button:hover,
-.adcheck-icon-button:hover,
-.adcheck-dom-jump:hover,
-.adcheck-row-remove:hover {
+.adcheck-add-button:hover {
   transform: translateY(-1px);
 }
 
@@ -242,20 +288,20 @@
 .adcheck-add-button {
   background: linear-gradient(135deg, var(--adcheck-accent), var(--adcheck-accent-deep));
   color: #fff;
-  box-shadow: 0 10px 18px var(--adcheck-glow);
+  box-shadow: 0 8px 16px var(--adcheck-glow);
 }
 
 .adcheck-button-secondary {
-  background: rgba(18, 33, 45, 0.08);
+  background: rgba(160, 30, 40, 0.08);
   color: var(--adcheck-ink);
 }
 
 .adcheck-icon-button {
-  min-width: 36px;
-  min-height: 36px;
-  padding: 0 12px;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0 10px;
   border-radius: 999px;
-  background: rgba(18, 33, 45, 0.08);
+  background: rgba(160, 30, 40, 0.08);
   color: var(--adcheck-ink);
 }
 
@@ -423,59 +469,74 @@
   color: var(--adcheck-warning);
 }
 
-/* ⓘ Info tooltip button */
+/* ⓘ Info tooltip button — Centered background fix */
 .adcheck-info-btn {
   position: relative;
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   border: none;
   border-radius: 50%;
-  background: rgba(18, 33, 45, 0.1);
-  color: var(--adcheck-ink-soft);
-  font-size: 10px;
+  background: rgba(160, 30, 40, 0.08);
+  color: var(--adcheck-accent);
+  font-size: 11px;
   font-style: italic;
-  font-weight: 700;
+  font-weight: 800;
   cursor: default;
   padding: 0;
   line-height: 1;
   transition: background 160ms ease;
 }
 
+/* Flicker fix: Create an invisible bridge to the tooltip */
+.adcheck-info-btn::before {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: -10px;
+  right: -10px;
+  height: 12px;
+  pointer-events: auto;
+  z-index: 5;
+}
+
 .adcheck-info-btn:hover {
-  background: rgba(13, 143, 138, 0.18);
-  color: var(--adcheck-accent-deep);
+  background: rgba(192, 57, 43, 0.15);
 }
 
 .adcheck-info-icon {
   font-style: italic;
+  display: block;
+  pointer-events: none;
 }
 
 .adcheck-info-tooltip {
   position: absolute;
-  bottom: calc(100% + 6px);
+  bottom: calc(100% + 8px);
   left: 50%;
   transform: translateX(-50%);
-  width: 200px;
-  padding: 8px 10px;
-  border-radius: 10px;
+  width: 190px;
+  padding: 10px 12px;
+  border-radius: 12px;
   background: var(--adcheck-ink);
   color: #fff;
   font-size: 11px;
   font-weight: 400;
   font-style: normal;
-  line-height: 1.4;
+  line-height: 1.45;
   letter-spacing: 0;
   text-transform: none;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 140ms ease;
-  z-index: 10;
+  visibility: hidden;
+  transition: opacity 160ms ease 40ms, visibility 160ms ease 40ms;
+  z-index: 100;
   white-space: normal;
   text-align: left;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.25);
 }
 
 .adcheck-info-tooltip::after {
@@ -484,12 +545,13 @@
   top: 100%;
   left: 50%;
   transform: translateX(-50%);
-  border: 5px solid transparent;
+  border: 6px solid transparent;
   border-top-color: var(--adcheck-ink);
 }
 
 .adcheck-info-btn:hover .adcheck-info-tooltip {
   opacity: 1;
+  visibility: visible;
 }
 
 .adcheck-result-detail {
@@ -509,20 +571,20 @@
   align-items: center;
   gap: 3px;
   margin-top: 5px;
-  padding: 2px 8px;
+  padding: 3px 9px;
   border: none;
   border-radius: 999px;
-  background: rgba(13, 143, 138, 0.1);
-  color: var(--adcheck-accent-deep);
+  background: rgba(192, 57, 43, 0.08);
+  color: var(--adcheck-accent);
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
   transition: background 140ms ease;
+  /* no transform hover to avoid flicker */
 }
 
 .adcheck-dom-jump:hover {
-  background: rgba(13, 143, 138, 0.2);
-  transform: none;
+  background: rgba(192, 57, 43, 0.18);
 }
 
 .adcheck-pull-tab {
@@ -537,7 +599,7 @@
   border-radius: 14px 0 0 14px;
   background: linear-gradient(180deg, var(--adcheck-accent-deep), var(--adcheck-accent));
   color: #fff;
-  box-shadow: -4px 8px 18px rgba(13, 143, 138, 0.28);
+  box-shadow: -4px 8px 18px rgba(192, 57, 43, 0.3);
   cursor: pointer;
   user-select: none;
   pointer-events: auto;
@@ -547,11 +609,11 @@
 }
 
 .adcheck-pull-tab:hover {
-  box-shadow: -6px 10px 22px rgba(13, 143, 138, 0.4);
+  box-shadow: -6px 10px 22px rgba(192, 57, 43, 0.45);
 }
 
 .adcheck-widget:not(.is-collapsed) .adcheck-pull-tab {
-  opacity: 0.55;
+  opacity: 0.5;
 }
 
 .adcheck-widget:not(.is-collapsed) .adcheck-pull-tab:hover {
@@ -561,10 +623,12 @@
 .adcheck-pull-tab span {
   writing-mode: vertical-rl;
   transform: rotate(180deg);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.15em;
   text-transform: uppercase;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.2);
 }
 
 .adcheck-hidden-copy {
@@ -572,50 +636,79 @@
 }
 
 .adcheck-target-highlight {
-  outline: 3px solid rgba(13, 143, 138, 0.9) !important;
+  outline: 3px solid rgba(192, 57, 43, 0.8) !important;
   outline-offset: 4px !important;
   animation: adcheck-highlight-flash 1.8s ease-out forwards;
 }
 
+/* Code chips for attribute values */
+.adcheck-code-chip {
+  display: inline;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgba(160, 30, 40, 0.08);
+  border: 1px solid rgba(160, 30, 40, 0.15);
+  color: var(--adcheck-accent-deep);
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 10px;
+  font-style: normal;
+  user-select: text;
+  cursor: text;
+}
+
+.adcheck-count-badge {
+  font-size: 10px;
+  color: var(--adcheck-ink-soft);
+  font-weight: 600;
+}
+
 .adcheck-popup-body {
-  min-width: 390px;
+  min-width: 380px;
   margin: 0;
   font-family: var(--adcheck-font-body);
   color: var(--adcheck-ink);
   background:
-    radial-gradient(circle at top left, rgba(13, 143, 138, 0.22), transparent 34%),
-    linear-gradient(180deg, #f5efe4, #efe5d6);
+    radial-gradient(circle at top left, rgba(192, 57, 43, 0.14), transparent 38%),
+    linear-gradient(180deg, #fff2f0, #ffe8e5);
 }
 
 .adcheck-popup-app {
-  padding: 18px;
+  padding: 16px;
 }
 
 .adcheck-popup-shell {
   position: relative;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.65);
-  border-radius: 26px;
+  border: 1px solid rgba(255, 200, 195, 0.7);
+  border-radius: 24px;
   background:
-    radial-gradient(circle at top right, rgba(216, 95, 52, 0.12), transparent 26%),
-    linear-gradient(180deg, rgba(255, 252, 246, 0.95), rgba(247, 242, 233, 0.95));
+    radial-gradient(circle at top right, rgba(192, 57, 43, 0.08), transparent 28%),
+    linear-gradient(180deg, rgba(255, 252, 251, 0.97), rgba(255, 245, 243, 0.97));
   box-shadow: var(--adcheck-shadow);
-  padding: 20px;
+  padding: 18px;
 }
 
+/* Toggle card: text on left, toggle switch on right */
 .adcheck-popup-toggle-card,
 .adcheck-config-section {
-  padding: 16px;
+  padding: 14px 16px;
   border: 1px solid var(--adcheck-line);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.62);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.adcheck-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .adcheck-popup-form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-top: 14px;
+  gap: 10px;
+  margin-top: 12px;
 }
 
 .adcheck-config-section-header {
@@ -623,12 +716,12 @@
   align-items: start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .adcheck-section-title {
-  margin: 0 0 4px;
-  font-size: 15px;
+  margin: 0 0 3px;
+  font-size: 14px;
   font-weight: 700;
 }
 
@@ -641,7 +734,8 @@
 .adcheck-entry-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: 12px;
+  align-items: center;
 }
 
 .adcheck-entry-input {
@@ -656,28 +750,39 @@
 }
 
 .adcheck-entry-input:focus {
-  outline: 2px solid rgba(13, 143, 138, 0.22);
-  border-color: rgba(13, 143, 138, 0.5);
+  outline: 2px solid rgba(192, 57, 43, 0.2);
+  border-color: rgba(192, 57, 43, 0.45);
 }
 
 .adcheck-row-remove {
-  width: 42px;
-  min-height: 42px;
-  border-radius: 14px;
-  background: rgba(187, 58, 40, 0.08);
+  width: 38px;
+  min-height: 38px;
+  border-radius: 12px;
+  background: rgba(192, 57, 43, 0.08);
   color: var(--adcheck-danger);
   font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 160ms ease;
+}
+
+.adcheck-row-remove:hover {
+  background: rgba(192, 57, 43, 0.15);
 }
 
 .adcheck-popup-actions {
+  display: flex;
   justify-content: space-between;
-  margin-top: 18px;
+  gap: 10px;
+  margin-top: 16px;
 }
 
 .adcheck-popup-status {
-  min-height: 18px;
-  margin: 12px 4px 0;
-  color: var(--adcheck-accent-deep);
+  min-height: 16px;
+  margin: 10px 4px 0;
+  color: var(--adcheck-accent);
   font-size: 12px;
   font-weight: 700;
 }
@@ -691,32 +796,36 @@
   align-items: center;
   gap: 10px;
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .adcheck-toggle input {
   position: absolute;
   opacity: 0;
   pointer-events: none;
+  width: 0;
+  height: 0;
 }
 
 .adcheck-toggle-track {
   position: relative;
   display: inline-flex;
   align-items: center;
-  width: 56px;
-  height: 32px;
-  padding: 4px;
+  width: 50px;
+  height: 28px;
+  padding: 3px;
   border-radius: 999px;
-  background: rgba(18, 33, 45, 0.14);
+  background: rgba(160, 30, 40, 0.15);
   transition: background-color 160ms ease;
+  flex-shrink: 0;
 }
 
 .adcheck-toggle-thumb {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 6px 12px rgba(18, 33, 45, 0.16);
+  box-shadow: 0 4px 8px rgba(100, 10, 10, 0.18);
   transition: transform 160ms ease;
 }
 
@@ -725,7 +834,7 @@
 }
 
 .adcheck-toggle input:checked + .adcheck-toggle-track .adcheck-toggle-thumb {
-  transform: translateX(24px);
+  transform: translateX(22px);
 }
 
 .adcheck-toggle-label {

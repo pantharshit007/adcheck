@@ -247,11 +247,12 @@
       const status = values.length > 0 ? "pass" : pendingOrFailedStatus();
       const detail = values.length > 0
         ? values
-            .map((valueSummary) => `"${valueSummary.value}"${valueSummary.count > 1 ? ` x${valueSummary.count}` : ""}`)
-            .join(", ")
+            .map((valueSummary) => `<code class="adcheck-code-chip">${escapeHtml(valueSummary.value)}</code>${valueSummary.count > 1 ? ` <span class="adcheck-count-badge">×${valueSummary.count}</span>` : ""}`)
+            .join(" ")
         : status === "pending"
           ? "Still scanning the page for this attribute."
           : "Attribute not found.";
+      const isHtml = values.length > 0;
 
       return {
         key: `attribute:${attributeName}`,
@@ -259,6 +260,7 @@
         status,
         explanation: HELP_COPY.attributes,
         detail,
+        detailIsHtml: isHtml,
         failureMessage: status === "fail" ? "Attribute not found." : undefined,
         attributeName,
         values
@@ -335,18 +337,14 @@
         </button>
         <div class="adcheck-widget-shell">
           <header class="adcheck-widget-header">
-            <div>
+            <div class="adcheck-widget-header-left">
               <p class="adcheck-widget-kicker">Publisher page review</p>
               <div class="adcheck-widget-title-row">
                 <h2 class="adcheck-widget-title">AdCheck</h2>
                 <span class="adcheck-badge" id="adcheckStatusBadge">0/0 clear</span>
               </div>
-              <p class="adcheck-widget-subtitle">A quick read on the ad signals this page is exposing right now.</p>
             </div>
-            <div class="adcheck-widget-actions">
-              <button class="adcheck-button adcheck-button-secondary" id="adcheckRefreshButton" type="button">Refresh checks</button>
-              <button class="adcheck-icon-button" id="adcheckHideButton" type="button" aria-label="Hide AdCheck">→</button>
-            </div>
+            <button class="adcheck-refresh-btn" id="adcheckRefreshButton" type="button" aria-label="Refresh checks" title="Refresh checks">&#8635;</button>
           </header>
           <div class="adcheck-group-list" id="adcheckResults"></div>
         </div>
@@ -452,7 +450,10 @@
       results.innerHTML = sections;
     }
     if (badge) {
-      badge.textContent = `${countPassingChecks()}/${countTotalChecks()} clear`;
+      const passing = countPassingChecks();
+      const total = countTotalChecks();
+      badge.textContent = `${passing}/${total} clear`;
+      badge.classList.toggle("is-all-pass", passing === total && total > 0);
     }
     if (toggleLabel) {
       toggleLabel.textContent = state.settings.widgetCollapsed ? "Open" : "Hide";
@@ -496,7 +497,12 @@
     const domAction = isDomResult(result) && result.found
       ? `<button class="adcheck-dom-jump" data-dom-id="${escapeAttribute(result.targetId)}" type="button">↗ Jump to element</button>`
       : "";
-    const visibleDetail = result.failureMessage ?? result.detail;
+    const isHtmlDetail = (result as AttributeCheckResult & { detailIsHtml?: boolean }).detailIsHtml === true;
+    const visibleDetail = result.failureMessage
+      ? escapeHtml(result.failureMessage)
+      : isHtmlDetail
+        ? result.detail
+        : escapeHtml(result.detail);
     const detailClass = result.failureMessage ? "adcheck-result-detail is-failure" : "adcheck-result-detail";
 
     return `
@@ -511,13 +517,14 @@
               <span class="adcheck-info-tooltip">${escapeHtml(result.explanation)}</span>
             </button>
           </div>
-          <p class="${detailClass}">${escapeHtml(visibleDetail)}</p>
+          <p class="${detailClass}">${visibleDetail}</p>
           ${hint ? `<p class="adcheck-result-detail is-failure">${escapeHtml(hint)}</p>` : ""}
           ${domAction}
         </div>
       </div>
     `;
   }
+
 
   function bindWidgetEvents(): void {
     if (!state.root) {
@@ -526,10 +533,6 @@
 
     state.root.querySelector<HTMLButtonElement>("#adcheckRefreshButton")?.addEventListener("click", () => {
       void runChecks(true);
-    });
-
-    state.root.querySelector<HTMLButtonElement>("#adcheckHideButton")?.addEventListener("click", () => {
-      void persistCollapsedState(true);
     });
 
     state.root.querySelector<HTMLButtonElement>("#adcheckToggleTab")?.addEventListener("click", () => {

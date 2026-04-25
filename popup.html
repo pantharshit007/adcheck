@@ -21,18 +21,20 @@
         </header>
 
         <section class="adcheck-popup-toggle-card">
-          <div>
-            <p class="adcheck-section-title">Extension status</p>
-            <p class="adcheck-section-copy">Show the AdCheck widget automatically on every HTTP and HTTPS page.</p>
+          <div class="adcheck-toggle-row">
+            <div>
+              <p class="adcheck-section-title">Widget enabled</p>
+              <p class="adcheck-section-copy">Show AdCheck on every HTTP and HTTPS page.</p>
+            </div>
+            <label class="adcheck-toggle" aria-label="Enable AdCheck widget">
+              <input type="checkbox" id="enabledToggle" />
+              <span class="adcheck-toggle-track">
+                <span class="adcheck-toggle-thumb"></span>
+              </span>
+            </label>
           </div>
-          <label class="adcheck-toggle">
-            <input type="checkbox" id="enabledToggle" />
-            <span class="adcheck-toggle-track">
-              <span class="adcheck-toggle-thumb"></span>
-            </span>
-            <span class="adcheck-toggle-label">Enabled</span>
-          </label>
         </section>
+
 
         <section class="adcheck-popup-form" id="settingsForm"></section>
 
