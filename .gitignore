@@ -1,1 +1,27 @@
 node_modules/
+dist/
+
+# Local environment and machine files
+.DS_Store
+Thumbs.db
+.env
+.env.*
+*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# TypeScript / tooling cache
+*.tsbuildinfo
+.vscode-test/
+
+# Test and coverage output
+coverage/
+
+# Temporary files
+tmp/
+temp/

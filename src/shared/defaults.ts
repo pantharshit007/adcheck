@@ -10,11 +10,11 @@ namespace AdCheckShared {
     enabled: false,
     widgetCollapsed: false,
     bundles: ["apInstreamBundle"],
-    classNames: ["videoHandler"],
-    domIds: ["ad-container"],
+    classNames: [],
+    domIds: ["videoWrapperDiv"],
     attributes: ["section-id"],
-    cookies: ["uid"],
-    localStorageKeys: ["adSession"]
+    cookies: [],
+    localStorageKeys: []
   };
 
   export const SETTINGS_SECTIONS = [
@@ -25,16 +25,16 @@ namespace AdCheckShared {
       placeholder: "apInstreamBundle"
     },
     {
+      key: "domIds",
+      title: "Page element IDs",
+      description: "Add IDs for ad slots or wrappers you want to jump to.",
+      placeholder: "videoWrapperDiv"
+    },
+    {
       key: "classNames",
       title: "CSS class names",
       description: "Look for page elements that carry these class names.",
       placeholder: "videoHandler"
-    },
-    {
-      key: "domIds",
-      title: "Page element IDs",
-      description: "Add IDs for ad slots or wrappers you want to jump to.",
-      placeholder: "ad-container"
     },
     {
       key: "attributes",

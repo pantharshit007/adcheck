@@ -435,8 +435,8 @@
 
     const sections = [
       renderGroup("Bundles", "Scripts we expect to load", state.snapshot.bundles),
-      renderGroup("Class names", "Page classes tied to ad rendering", state.snapshot.classNames),
       renderGroup("Page elements", "IDs you can jump to on the page", state.snapshot.domIds),
+      renderGroup("Class names", "Page classes tied to ad rendering", state.snapshot.classNames),
       renderGroup("Attributes", "Values pulled directly from the DOM", state.snapshot.attributes),
       renderGroup("Cookies", "Browser cookies this setup may rely on", state.snapshot.cookies),
       renderGroup("Local storage", "Page storage keys this setup may need", state.snapshot.localStorageKeys)
@@ -463,16 +463,24 @@
   }
 
   function renderGroup(title: string, description: string, results: CheckResultBase[]): string {
+    if (results.length === 0) {
+      return "";
+    }
     const passedCount = results.filter((result) => result.status === "pass").length;
+    const allPass = passedCount === results.length;
+    const metaClass = allPass ? "adcheck-group-meta is-all-pass" : "adcheck-group-meta";
 
     return `
       <section class="adcheck-group">
         <div class="adcheck-group-heading">
-          <div>
-            <h3 class="adcheck-group-title">${escapeHtml(title)}</h3>
-            <p class="adcheck-group-description">${escapeHtml(description)}</p>
-          </div>
-          <div class="adcheck-group-meta">${passedCount}/${results.length}</div>
+          <h3 class="adcheck-group-title">
+            ${escapeHtml(title)}
+            <button class="adcheck-info-btn" type="button" aria-label="About this section">
+              <span class="adcheck-info-icon">i</span>
+              <span class="adcheck-info-tooltip">${escapeHtml(description)}</span>
+            </button>
+          </h3>
+          <div class="${metaClass}">${passedCount}/${results.length}</div>
         </div>
         <div class="adcheck-results">
           ${results.map((result) => renderResult(result)).join("")}
@@ -484,24 +492,27 @@
   function renderResult(result: CheckResultBase): string {
     const rowClass = `adcheck-result-row is-${result.status}${isDomResult(result) ? " is-clickable" : ""}`;
     const statusIcon = result.status === "pass" ? "✓" : result.status === "fail" ? "×" : "";
-    const detailClasses = result.failureMessage ? "adcheck-result-detail adcheck-result-failure" : "adcheck-result-detail";
     const hint = state.rowHints[result.key];
-    const domAction = isDomResult(result)
-      ? `<button class="adcheck-dom-jump" data-dom-id="${escapeAttribute(result.targetId)}" type="button">Jump to element</button>`
+    const domAction = isDomResult(result) && result.found
+      ? `<button class="adcheck-dom-jump" data-dom-id="${escapeAttribute(result.targetId)}" type="button">↗ Jump to element</button>`
       : "";
+    const visibleDetail = result.failureMessage ?? result.detail;
+    const detailClass = result.failureMessage ? "adcheck-result-detail is-failure" : "adcheck-result-detail";
 
     return `
       <div class="${rowClass}" ${isDomResult(result) ? `data-dom-result="${escapeAttribute(result.targetId)}"` : ""}>
         <div class="adcheck-status-icon is-${result.status}">${statusIcon}</div>
-        <div>
+        <div class="adcheck-result-body">
           <div class="adcheck-result-label-row">
-            <span class="adcheck-result-label" title="${escapeAttribute(result.explanation)}">${escapeHtml(result.label)}</span>
-            <span class="adcheck-result-pill">${escapeHtml(result.status)}</span>
+            <span class="adcheck-result-label">${escapeHtml(result.label)}</span>
+            <span class="adcheck-result-pill is-${result.status}">${escapeHtml(result.status)}</span>
+            <button class="adcheck-info-btn" type="button" aria-label="What does this check?">
+              <span class="adcheck-info-icon">i</span>
+              <span class="adcheck-info-tooltip">${escapeHtml(result.explanation)}</span>
+            </button>
           </div>
-          <p class="adcheck-result-explanation">${escapeHtml(result.explanation)}</p>
-          <p class="adcheck-result-detail">${escapeHtml(result.detail)}</p>
-          ${result.failureMessage ? `<p class="${detailClasses}">${escapeHtml(result.failureMessage)}</p>` : ""}
-          ${hint ? `<p class="adcheck-result-detail adcheck-result-failure">${escapeHtml(hint)}</p>` : ""}
+          <p class="${detailClass}">${escapeHtml(visibleDetail)}</p>
+          ${hint ? `<p class="adcheck-result-detail is-failure">${escapeHtml(hint)}</p>` : ""}
           ${domAction}
         </div>
       </div>
