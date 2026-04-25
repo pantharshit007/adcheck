@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AdCheck Settings</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="adcheck-popup-body">
+    <main class="adcheck-popup-app" id="app">
+      <section class="adcheck-popup-shell">
+        <header class="adcheck-popup-hero">
+          <p class="adcheck-popup-kicker">Publisher page review</p>
+          <div class="adcheck-popup-headline">
+            <h1>AdCheck</h1>
+            <span class="adcheck-popup-chip">MV3</span>
+          </div>
+          <p class="adcheck-popup-copy">
+            Turn on the floating helper, choose what to verify, and save the checks your team uses every day.
+          </p>
+        </header>
+
+        <section class="adcheck-popup-toggle-card">
+          <div>
+            <p class="adcheck-section-title">Extension status</p>
+            <p class="adcheck-section-copy">Show the AdCheck widget automatically on every HTTP and HTTPS page.</p>
+          </div>
+          <label class="adcheck-toggle">
+            <input type="checkbox" id="enabledToggle" />
+            <span class="adcheck-toggle-track">
+              <span class="adcheck-toggle-thumb"></span>
+            </span>
+            <span class="adcheck-toggle-label">Enabled</span>
+          </label>
+        </section>
+
+        <section class="adcheck-popup-form" id="settingsForm"></section>
+
+        <footer class="adcheck-popup-actions">
+          <button class="adcheck-button adcheck-button-secondary" id="resetDefaultsButton" type="button">
+            Reset defaults
+          </button>
+          <button class="adcheck-button adcheck-button-primary" id="saveButton" type="button">
+            Save settings
+          </button>
+        </footer>
+
+        <p class="adcheck-popup-status" id="statusMessage" aria-live="polite"></p>
+      </section>
+    </main>
+
+    <script src="shared/defaults.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
