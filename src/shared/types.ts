@@ -10,6 +10,7 @@ declare namespace AdCheckShared {
     attributes: string[];
     cookies: string[];
     localStorageKeys: string[];
+    ignoredDomains: string[];
   }
 
   interface NetworkHistoryEntry {
@@ -81,6 +82,12 @@ declare namespace AdCheckShared {
   }
 
   interface RuntimeMessage {
-    type: "GET_SETTINGS" | "GET_TAB_NETWORK_STATE" | "REFRESH_TAB_NETWORK_STATE" | "NETWORK_ACTIVITY_UPDATED";
+    type:
+      | "GET_SETTINGS"
+      | "GET_TAB_NETWORK_STATE"
+      | "REFRESH_TAB_NETWORK_STATE"
+      | "NETWORK_ACTIVITY_UPDATED"
+      | "SET_ACTION_SUCCESS_STATE";
+    allPass?: boolean;
   }
 }

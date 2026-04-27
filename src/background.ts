@@ -127,6 +127,15 @@
       }
       case "NETWORK_ACTIVITY_UPDATED":
         return { ok: true };
+      case "SET_ACTION_SUCCESS_STATE": {
+        const tabId = sender.tab?.id;
+        if (typeof tabId !== "number") {
+          return { ok: false };
+        }
+
+        await updateActionBadge(tabId, message.allPass === true);
+        return { ok: true };
+      }
       default:
         return { ok: false, error: "Unsupported message." };
     }
@@ -138,6 +147,7 @@
     }
 
     if (details.type === "main_frame") {
+      await updateActionBadge(details.tabId, false);
       await resetTabState(details.tabId);
       return;
     }
@@ -245,6 +255,7 @@
     await chrome.storage.session.set({
       [AdCheckShared.tabStateStorageKey(tabId)]: emptyState
     });
+    await updateActionBadge(tabId, false);
     await notifyTab(tabId);
   }
 
@@ -268,5 +279,19 @@
       activeRequests: [...state.activeRequests],
       lastUpdatedAt: state.lastUpdatedAt
     };
+  }
+
+  async function updateActionBadge(tabId: number, allPass: boolean): Promise<void> {
+    await chrome.action.setBadgeText({
+      tabId,
+      text: allPass ? "✓" : ""
+    });
+
+    if (allPass) {
+      await chrome.action.setBadgeBackgroundColor({
+        tabId,
+        color: "#1f7a40"
+      });
+    }
   }
 })();

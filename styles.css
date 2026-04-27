@@ -616,7 +616,15 @@
   opacity: 0.5;
 }
 
+.adcheck-widget.is-collapsed .adcheck-pull-tab {
+  opacity: 0.5;
+}
+
 .adcheck-widget:not(.is-collapsed) .adcheck-pull-tab:hover {
+  opacity: 1;
+}
+
+.adcheck-widget.is-collapsed .adcheck-pull-tab:hover {
   opacity: 1;
 }
 
@@ -688,13 +696,35 @@
   padding: 18px;
 }
 
-/* Toggle card: text on left, toggle switch on right */
+.adcheck-popup-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.adcheck-popup-hero-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.adcheck-popup-hero-copy {
+  min-width: 0;
+  flex: 1;
+}
+
 .adcheck-popup-toggle-card,
 .adcheck-config-section {
   padding: 14px 16px;
   border: 1px solid var(--adcheck-line);
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.68);
+}
+
+.adcheck-popup-toggle-card {
+  min-width: 156px;
+  padding: 12px 14px;
 }
 
 .adcheck-toggle-row {
@@ -733,12 +763,13 @@
 
 .adcheck-entry-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 38px;
   gap: 12px;
   align-items: center;
 }
 
 .adcheck-entry-input {
+  min-width: 0;
   width: 100%;
   min-height: 42px;
   padding: 0 14px;
@@ -756,6 +787,7 @@
 
 .adcheck-row-remove {
   width: 38px;
+  height: 38px;
   min-height: 38px;
   border-radius: 12px;
   background: rgba(192, 57, 43, 0.08);
@@ -781,10 +813,29 @@
 
 .adcheck-popup-status {
   min-height: 16px;
-  margin: 10px 4px 0;
+  margin: 0;
   color: var(--adcheck-accent);
   font-size: 12px;
   font-weight: 700;
+}
+
+.adcheck-popup-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 4px 0;
+}
+
+.adcheck-popup-source-link {
+  color: var(--adcheck-accent);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.adcheck-popup-source-link:hover {
+  text-decoration: underline;
 }
 
 .adcheck-toggle-card {
@@ -850,5 +901,16 @@
 
   .adcheck-widget {
     width: min(360px, calc(100vw - 20px));
+  }
+
+  .adcheck-popup-hero-top,
+  .adcheck-popup-meta,
+  .adcheck-popup-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .adcheck-popup-toggle-card {
+    min-width: 0;
   }
 }

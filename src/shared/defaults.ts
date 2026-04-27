@@ -12,9 +12,10 @@ namespace AdCheckShared {
     bundles: ["apInstreamBundle"],
     classNames: [],
     domIds: ["videoWrapperDiv"],
-    attributes: ["section-id"],
+    attributes: ["data-instreamplayermode"],
     cookies: [],
-    localStorageKeys: []
+    localStorageKeys: [],
+    ignoredDomains: []
   };
 
   export const SETTINGS_SECTIONS = [
@@ -40,7 +41,7 @@ namespace AdCheckShared {
       key: "attributes",
       title: "Attribute names",
       description: "Find values like section IDs or ad unit metadata anywhere in the DOM.",
-      placeholder: "section-id"
+      placeholder: "data-instreamplayermode"
     },
     {
       key: "cookies",
@@ -53,6 +54,12 @@ namespace AdCheckShared {
       title: "Local storage keys",
       description: "Verify page storage keys such as session or targeting data.",
       placeholder: "adSession"
+    },
+    {
+      key: "ignoredDomains",
+      title: "Ignored domains",
+      description: "Skip AdCheck on these hosts. Use example.com for domains or google|github\\.com for regex.",
+      placeholder: "example.com or google|github\\.com"
     }
   ] as const;
 
@@ -65,7 +72,8 @@ namespace AdCheckShared {
       domIds: [...DEFAULT_SETTINGS.domIds],
       attributes: [...DEFAULT_SETTINGS.attributes],
       cookies: [...DEFAULT_SETTINGS.cookies],
-      localStorageKeys: [...DEFAULT_SETTINGS.localStorageKeys]
+      localStorageKeys: [...DEFAULT_SETTINGS.localStorageKeys],
+      ignoredDomains: [...DEFAULT_SETTINGS.ignoredDomains]
     };
   }
 
@@ -84,7 +92,8 @@ namespace AdCheckShared {
       domIds: normalizeEntries(candidate.domIds, defaults.domIds),
       attributes: normalizeEntries(candidate.attributes, defaults.attributes),
       cookies: normalizeEntries(candidate.cookies, defaults.cookies),
-      localStorageKeys: normalizeEntries(candidate.localStorageKeys, defaults.localStorageKeys)
+      localStorageKeys: normalizeEntries(candidate.localStorageKeys, defaults.localStorageKeys),
+      ignoredDomains: normalizeEntries(candidate.ignoredDomains, defaults.ignoredDomains)
     };
   }
 

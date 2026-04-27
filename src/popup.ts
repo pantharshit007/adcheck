@@ -181,10 +181,6 @@
         inputs.map((input) => input.value),
         []
       );
-
-      if (base[section.key].length === 0) {
-        base[section.key] = [...AdCheckShared.DEFAULT_SETTINGS[section.key]];
-      }
     }
 
     return base;

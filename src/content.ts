@@ -32,8 +32,6 @@
     networkState: NetworkTabState;
     deadlineAt: number | null;
     root: HTMLDivElement | null;
-    observer: MutationObserver | null;
-    debounceHandle: number | null;
     deadlineHandle: number | null;
     pollHandle: number | null;
     rowHints: Record<string, string>;
@@ -44,8 +42,6 @@
     networkState: AdCheckShared.createEmptyTabState(),
     deadlineAt: null,
     root: null,
-    observer: null,
-    debounceHandle: null,
     deadlineHandle: null,
     pollHandle: null,
     rowHints: {},
@@ -81,19 +77,23 @@
   async function applySettings(nextSettings: Settings): Promise<void> {
     state.settings = nextSettings;
 
-    if (!nextSettings.enabled) {
+    if (!nextSettings.enabled || shouldIgnoreCurrentPage(nextSettings)) {
+      await updateActionSuccessState(false);
       teardownWidget();
       return;
     }
 
     ensureWidget();
-    setupObservers();
     await runChecks(true);
   }
 
   async function runChecks(resetDeadline: boolean): Promise<void> {
-    if (!state.settings.enabled) {
+    if (!state.settings.enabled || shouldIgnoreCurrentPage(state.settings)) {
       return;
+    }
+
+    if (resetDeadline) {
+      stopPolling();
     }
 
     if (resetDeadline) {
@@ -104,12 +104,22 @@
     state.networkState = await getNetworkState(resetDeadline ? "REFRESH_TAB_NETWORK_STATE" : "GET_TAB_NETWORK_STATE");
     state.snapshot = buildSnapshot();
     renderWidget();
+    syncPollingState();
   }
 
   async function syncNetworkAndRefresh(resetDeadline: boolean): Promise<void> {
+    if (!state.settings.enabled || shouldIgnoreCurrentPage(state.settings)) {
+      return;
+    }
+
+    if (!resetDeadline && !hasPendingChecks()) {
+      return;
+    }
+
     state.networkState = await getNetworkState(resetDeadline ? "REFRESH_TAB_NETWORK_STATE" : "GET_TAB_NETWORK_STATE");
     state.snapshot = buildSnapshot();
     renderWidget();
+    syncPollingState();
   }
 
   function buildSnapshot(): PageCheckSnapshot {
@@ -357,25 +367,12 @@
   }
 
   function teardownWidget(): void {
-    if (state.observer) {
-      state.observer.disconnect();
-      state.observer = null;
-    }
-
-    if (state.debounceHandle) {
-      window.clearTimeout(state.debounceHandle);
-      state.debounceHandle = null;
-    }
-
     if (state.deadlineHandle) {
       window.clearTimeout(state.deadlineHandle);
       state.deadlineHandle = null;
     }
 
-    if (state.pollHandle) {
-      window.clearInterval(state.pollHandle);
-      state.pollHandle = null;
-    }
+    stopPolling();
 
     state.rowHints = {};
     state.snapshot = createEmptySnapshot();
@@ -388,32 +385,31 @@
     }
   }
 
-  function setupObservers(): void {
-    if (state.observer) {
+  function syncPollingState(): void {
+    if (!state.settings.enabled) {
+      stopPolling();
       return;
     }
 
-    state.observer = new MutationObserver(() => {
-      if (state.debounceHandle) {
-        window.clearTimeout(state.debounceHandle);
-      }
+    if (!hasPendingChecks()) {
+      stopPolling();
+      return;
+    }
 
-      state.debounceHandle = window.setTimeout(() => {
-        state.snapshot = buildSnapshot();
-        renderWidget();
-      }, 160);
-    });
-
-    state.observer.observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-      attributes: true
-    });
+    if (state.pollHandle) {
+      return;
+    }
 
     state.pollHandle = window.setInterval(() => {
-      state.snapshot = buildSnapshot();
-      renderWidget();
+      void runChecks(false);
     }, 1500);
+  }
+
+  function stopPolling(): void {
+    if (state.pollHandle) {
+      window.clearInterval(state.pollHandle);
+      state.pollHandle = null;
+    }
   }
 
   function renderWidget(): void {
@@ -424,7 +420,14 @@
     const signature = JSON.stringify({
       collapsed: state.settings.widgetCollapsed,
       hints: state.rowHints,
-      snapshot: state.snapshot
+      snapshot: {
+        bundles: state.snapshot.bundles,
+        classNames: state.snapshot.classNames,
+        domIds: state.snapshot.domIds,
+        attributes: state.snapshot.attributes,
+        cookies: state.snapshot.cookies,
+        localStorageKeys: state.snapshot.localStorageKeys
+      }
     });
 
     if (signature === state.lastRenderSignature) {
@@ -452,8 +455,10 @@
     if (badge) {
       const passing = countPassingChecks();
       const total = countTotalChecks();
+      const allPass = passing === total && total > 0;
       badge.textContent = `${passing}/${total} clear`;
-      badge.classList.toggle("is-all-pass", passing === total && total > 0);
+      badge.classList.toggle("is-all-pass", allPass);
+      void updateActionSuccessState(allPass);
     }
     if (toggleLabel) {
       toggleLabel.textContent = state.settings.widgetCollapsed ? "Open" : "Hide";
@@ -680,6 +685,19 @@
     );
   }
 
+  function hasPendingChecks(): boolean {
+    const allResults = [
+      ...state.snapshot.bundles,
+      ...state.snapshot.classNames,
+      ...state.snapshot.domIds,
+      ...state.snapshot.attributes,
+      ...state.snapshot.cookies,
+      ...state.snapshot.localStorageKeys
+    ];
+
+    return allResults.some((result) => result.status === "pending");
+  }
+
   function createEmptySnapshot(): PageCheckSnapshot {
     return {
       bundles: [],
@@ -690,6 +708,83 @@
       localStorageKeys: [],
       lastRunAt: Date.now()
     };
+  }
+
+  function shouldIgnoreCurrentPage(settings: Settings): boolean {
+    if (settings.ignoredDomains.length === 0) {
+      return false;
+    }
+
+    const href = window.location.href;
+    const hostname = window.location.hostname.toLowerCase();
+
+    return settings.ignoredDomains.some((entry) => matchesIgnoredDomain(entry, hostname, href));
+  }
+
+  function matchesIgnoredDomain(entry: string, hostname: string, href: string): boolean {
+    const regex = parseIgnoredDomainRegex(entry);
+    if (regex) {
+      regex.lastIndex = 0;
+      return regex.test(hostname) || regex.test(href);
+    }
+
+    const normalizedDomain = normalizeIgnoredDomain(entry);
+    if (!normalizedDomain) {
+      return false;
+    }
+
+    return hostname === normalizedDomain || hostname.endsWith(`.${normalizedDomain}`);
+  }
+
+  function parseIgnoredDomainRegex(entry: string): RegExp | null {
+    const trimmed = entry.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const slashMatch = trimmed.match(/^\/(.+)\/([dgimsuvy]*)$/);
+    if (slashMatch) {
+      try {
+        return new RegExp(slashMatch[1], slashMatch[2]);
+      } catch {
+        return null;
+      }
+    }
+
+    if (!trimmed.startsWith("regex:")) {
+      if (!looksLikeRegexPattern(trimmed)) {
+        return null;
+      }
+
+      try {
+        return new RegExp(trimmed, "i");
+      } catch {
+        return null;
+      }
+    }
+
+    try {
+      return new RegExp(trimmed.slice("regex:".length));
+    } catch {
+      return null;
+    }
+  }
+
+  function normalizeIgnoredDomain(entry: string): string {
+    const trimmed = entry.trim().toLowerCase();
+    if (!trimmed) {
+      return "";
+    }
+
+    try {
+      return new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`).hostname.toLowerCase();
+    } catch {
+      return trimmed.replace(/^https?:\/\//, "").split("/")[0].split(":")[0].toLowerCase();
+    }
+  }
+
+  function looksLikeRegexPattern(value: string): boolean {
+    return /[|()[\]{}+*$^\\]/.test(value);
   }
 
   async function loadSettings(): Promise<Settings> {
@@ -714,6 +809,13 @@
     } catch {
       return null;
     }
+  }
+
+  async function updateActionSuccessState(allPass: boolean): Promise<void> {
+    await sendMessage({
+      type: "SET_ACTION_SUCCESS_STATE",
+      allPass
+    });
   }
 
   function cssEscape(value: string): string {
