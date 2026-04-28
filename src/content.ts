@@ -715,17 +715,16 @@
       return false;
     }
 
-    const href = window.location.href;
     const hostname = window.location.hostname.toLowerCase();
 
-    return settings.ignoredDomains.some((entry) => matchesIgnoredDomain(entry, hostname, href));
+    return settings.ignoredDomains.some((entry) => matchesIgnoredDomain(entry, hostname));
   }
 
-  function matchesIgnoredDomain(entry: string, hostname: string, href: string): boolean {
+  function matchesIgnoredDomain(entry: string, hostname: string): boolean {
     const regex = parseIgnoredDomainRegex(entry);
     if (regex) {
       regex.lastIndex = 0;
-      return regex.test(hostname) || regex.test(href);
+      return regex.test(hostname);
     }
 
     const normalizedDomain = normalizeIgnoredDomain(entry);

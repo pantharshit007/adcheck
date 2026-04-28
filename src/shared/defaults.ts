@@ -58,7 +58,7 @@ namespace AdCheckShared {
     {
       key: "ignoredDomains",
       title: "Ignored domains",
-      description: "Skip AdCheck on these hosts. Use example.com for domains or google|github\\.com for regex.",
+      description: "Skip AdCheck on matching hostnames. Use example.com for domains or google|github\\.com for regex.",
       placeholder: "example.com or google|github\\.com"
     }
   ] as const;
