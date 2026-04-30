@@ -103,18 +103,14 @@ function strokeLine(buffer, size, x0, y0, x1, y1, thickness, color) {
   }
 }
 
-function createIcon(size) {
+function createIcon(size, palette) {
   const raw = Buffer.alloc(size * (size * 4 + 1), 0);
 
   for (let y = 0; y < size; y += 1) {
     raw[y * (size * 4 + 1)] = 0;
   }
 
-  const backgroundA = [11, 109, 114, 255];
-  const backgroundB = [13, 143, 138, 255];
-  const accent = [216, 95, 52, 255];
-  const warm = [245, 239, 228, 255];
-  const deep = [18, 33, 45, 255];
+  const { backgroundA, backgroundB, accent, warm, deep } = palette;
 
   for (let y = 0; y < size; y += 1) {
     const blend = y / Math.max(size - 1, 1);
@@ -178,6 +174,24 @@ function createIcon(size) {
   ]);
 }
 
+const palettes = {
+  color: {
+    backgroundA: [11, 109, 114, 255],
+    backgroundB: [13, 143, 138, 255],
+    accent: [216, 95, 52, 255],
+    warm: [245, 239, 228, 255],
+    deep: [18, 33, 45, 255]
+  },
+  gray: {
+    backgroundA: [114, 119, 124, 255],
+    backgroundB: [154, 160, 166, 255],
+    accent: [189, 193, 198, 255],
+    warm: [242, 244, 247, 255],
+    deep: [86, 92, 98, 255]
+  }
+};
+
 for (const size of [16, 48, 128]) {
-  writeFileSync(join(iconsDir, `${size}.png`), createIcon(size));
+  writeFileSync(join(iconsDir, `${size}.png`), createIcon(size, palettes.color));
+  writeFileSync(join(iconsDir, `${size}-gray.png`), createIcon(size, palettes.gray));
 }

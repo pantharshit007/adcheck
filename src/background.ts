@@ -21,6 +21,19 @@
     tabId: number;
   };
 
+  const ACTION_ICON_PATHS = {
+    color: {
+      16: "icons/16.png",
+      48: "icons/48.png",
+      128: "icons/128.png"
+    },
+    gray: {
+      16: "icons/16-gray.png",
+      48: "icons/48-gray.png",
+      128: "icons/128-gray.png"
+    }
+  } as const;
+
   const settingsCache: { current: Settings } = {
     current: AdCheckShared.cloneDefaultSettings()
   };
@@ -42,7 +55,16 @@
     const nextValue = changes[AdCheckShared.STORAGE_KEY]?.newValue as Partial<Settings> | undefined;
     if (nextValue) {
       settingsCache.current = AdCheckShared.mergeSettings(nextValue);
+      void syncActionIcons();
     }
+  });
+
+  chrome.tabs.onActivated.addListener(() => {
+    void syncActionIcons();
+  });
+
+  chrome.tabs.onUpdated.addListener(() => {
+    void syncActionIcons();
   });
 
   chrome.tabs.onRemoved.addListener((tabId) => {
@@ -87,6 +109,7 @@
 
   async function initialize(): Promise<void> {
     settingsCache.current = await ensureSettings();
+    await syncActionIcons();
   }
 
   async function ensureSettings(): Promise<Settings> {
@@ -100,6 +123,7 @@
     }
 
     settingsCache.current = merged;
+    await syncActionIcons();
     return merged;
   }
 
@@ -136,6 +160,9 @@
         await updateActionBadge(tabId, message.allPass === true);
         return { ok: true };
       }
+      case "SYNC_ACTION_STATE":
+        await syncActionIcons();
+        return { ok: true };
       default:
         return { ok: false, error: "Unsupported message." };
     }
@@ -291,6 +318,26 @@
       await chrome.action.setBadgeBackgroundColor({
         tabId,
         color: "#1f7a40"
+      });
+    }
+  }
+
+  async function syncActionIcons(): Promise<void> {
+    const tabs = await chrome.tabs.query({});
+    const iconPaths = settingsCache.current.enabled ? ACTION_ICON_PATHS.color : ACTION_ICON_PATHS.gray;
+
+    await chrome.action.setIcon({
+      path: iconPaths
+    });
+
+    for (const tab of tabs) {
+      if (typeof tab.id !== "number") {
+        continue;
+      }
+
+      await chrome.action.setIcon({
+        tabId: tab.id,
+        path: iconPaths
       });
     }
   }

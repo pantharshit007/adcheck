@@ -1,346 +1,367 @@
 /// <reference path="./shared/types.ts" />
 
 (() => {
-  type Settings = AdCheckShared.Settings;
-  type NetworkTabState = AdCheckShared.NetworkTabState;
-  type PageCheckSnapshot = AdCheckShared.PageCheckSnapshot;
-  type CheckResultBase = AdCheckShared.CheckResultBase;
-  type BundleCheckResult = AdCheckShared.BundleCheckResult;
-  type DomCheckResult = AdCheckShared.DomCheckResult;
-  type AttributeCheckResult = AdCheckShared.AttributeCheckResult;
-  type StorageCheckResult = AdCheckShared.StorageCheckResult;
-  type RuntimeMessage = AdCheckShared.RuntimeMessage;
+	type Settings = AdCheckShared.Settings;
+	type NetworkTabState = AdCheckShared.NetworkTabState;
+	type PageCheckSnapshot = AdCheckShared.PageCheckSnapshot;
+	type CheckResultBase = AdCheckShared.CheckResultBase;
+	type BundleCheckResult = AdCheckShared.BundleCheckResult;
+	type DomCheckResult = AdCheckShared.DomCheckResult;
+	type AttributeCheckResult = AdCheckShared.AttributeCheckResult;
+	type StorageCheckResult = AdCheckShared.StorageCheckResult;
+	type RuntimeMessage = AdCheckShared.RuntimeMessage;
 
-  const pageWindow = window as Window & {
-    __ADCHECK_BOOTSTRAPPED__?: boolean;
-  };
+	const pageWindow = window as Window & {
+		__ADCHECK_BOOTSTRAPPED__?: boolean;
+	};
 
-  const ROOT_ID = "adcheck-root";
-  const HIGHLIGHT_CLASS = "adcheck-target-highlight";
-  const HELP_COPY = {
-    bundles: "Checks whether the ad script made a network request on this page.",
-    classNames: "Looks through the page for elements using this CSS class name.",
-    domIds: "Checks whether this page element ID exists and lets you jump to it.",
-    attributes: "Finds every value used for this attribute anywhere in the page markup.",
-    cookies: "Verifies whether this browser cookie is available to the page.",
-    localStorageKeys: "Checks whether this page stored the key in local storage."
-  } as const;
+	const ROOT_ID = "adcheck-root";
+	const HIGHLIGHT_CLASS = "adcheck-target-highlight";
+	const HELP_COPY = {
+		bundles: "Checks whether the ad script made a network request on this page.",
+		classNames: "Looks through the page for elements using this CSS class name.",
+		domIds: "Checks whether this page element ID exists and lets you jump to it.",
+		attributes: "Finds every value used for this attribute anywhere in the page markup.",
+		cookies: "Verifies whether this browser cookie is available to the page.",
+		localStorageKeys: "Checks whether this page stored the key in local storage.",
+	} as const;
 
-  const state: {
-    settings: Settings;
-    snapshot: PageCheckSnapshot;
-    networkState: NetworkTabState;
-    deadlineAt: number | null;
-    root: HTMLDivElement | null;
-    deadlineHandle: number | null;
-    pollHandle: number | null;
-    rowHints: Record<string, string>;
-    lastRenderSignature: string;
-  } = {
-    settings: AdCheckShared.cloneDefaultSettings(),
-    snapshot: createEmptySnapshot(),
-    networkState: AdCheckShared.createEmptyTabState(),
-    deadlineAt: null,
-    root: null,
-    deadlineHandle: null,
-    pollHandle: null,
-    rowHints: {},
-    lastRenderSignature: ""
-  };
+	const state: {
+		settings: Settings;
+		snapshot: PageCheckSnapshot;
+		networkState: NetworkTabState;
+		deadlineAt: number | null;
+		root: HTMLDivElement | null;
+		deadlineHandle: number | null;
+		pollHandle: number | null;
+		rowHints: Record<string, string>;
+		lastRenderSignature: string;
+	} = {
+		settings: AdCheckShared.cloneDefaultSettings(),
+		snapshot: createEmptySnapshot(),
+		networkState: AdCheckShared.createEmptyTabState(),
+		deadlineAt: null,
+		root: null,
+		deadlineHandle: null,
+		pollHandle: null,
+		rowHints: {},
+		lastRenderSignature: "",
+	};
 
-  if (!pageWindow.__ADCHECK_BOOTSTRAPPED__) {
-    pageWindow.__ADCHECK_BOOTSTRAPPED__ = true;
-    void bootstrap();
-  }
+	if (!pageWindow.__ADCHECK_BOOTSTRAPPED__) {
+		pageWindow.__ADCHECK_BOOTSTRAPPED__ = true;
+		void bootstrap();
+	}
 
-  async function bootstrap(): Promise<void> {
-    await applySettings(await loadSettings());
+	async function bootstrap(): Promise<void> {
+		await applySettings(await loadSettings());
 
-    chrome.runtime.onMessage.addListener((message: RuntimeMessage) => {
-      if (message.type === "NETWORK_ACTIVITY_UPDATED") {
-        void syncNetworkAndRefresh(false);
-      }
+		chrome.runtime.onMessage.addListener((message: RuntimeMessage) => {
+			if (message.type === "NETWORK_ACTIVITY_UPDATED") {
+				void syncNetworkAndRefresh(false);
+			}
 
-      return undefined;
-    });
+			return undefined;
+		});
 
-    chrome.storage.onChanged.addListener((changes, areaName) => {
-      if (areaName !== "sync" || !changes[AdCheckShared.STORAGE_KEY]) {
-        return;
-      }
+		chrome.storage.onChanged.addListener((changes, areaName) => {
+			if (areaName !== "sync" || !changes[AdCheckShared.STORAGE_KEY]) {
+				return;
+			}
 
-      const merged = AdCheckShared.mergeSettings(changes[AdCheckShared.STORAGE_KEY].newValue as Partial<Settings>);
-      void applySettings(merged);
-    });
-  }
+			const merged = AdCheckShared.mergeSettings(
+				changes[AdCheckShared.STORAGE_KEY].newValue as Partial<Settings>,
+			);
+			void applySettings(merged);
+		});
+	}
 
-  async function applySettings(nextSettings: Settings): Promise<void> {
-    state.settings = nextSettings;
+	async function applySettings(nextSettings: Settings): Promise<void> {
+		state.settings = nextSettings;
 
-    if (!nextSettings.enabled || shouldIgnoreCurrentPage(nextSettings)) {
-      await updateActionSuccessState(false);
-      teardownWidget();
-      return;
-    }
+		if (!nextSettings.enabled || shouldIgnoreCurrentPage(nextSettings)) {
+			await updateActionSuccessState(false);
+			teardownWidget();
+			return;
+		}
 
-    ensureWidget();
-    await runChecks(true);
-  }
+		ensureWidget();
+		await runChecks(true);
+	}
 
-  async function runChecks(resetDeadline: boolean): Promise<void> {
-    if (!state.settings.enabled || shouldIgnoreCurrentPage(state.settings)) {
-      return;
-    }
+	async function runChecks(resetDeadline: boolean): Promise<void> {
+		if (!state.settings.enabled || shouldIgnoreCurrentPage(state.settings)) {
+			return;
+		}
 
-    if (resetDeadline) {
-      stopPolling();
-    }
+		if (resetDeadline) {
+			stopPolling();
+		}
 
-    if (resetDeadline) {
-      state.deadlineAt = Date.now() + AdCheckShared.DEFAULT_WAIT_MS;
-      scheduleDeadlineRender();
-    }
+		if (resetDeadline) {
+			state.deadlineAt = Date.now() + AdCheckShared.DEFAULT_WAIT_MS;
+			scheduleDeadlineRender();
+		}
 
-    state.networkState = await getNetworkState(resetDeadline ? "REFRESH_TAB_NETWORK_STATE" : "GET_TAB_NETWORK_STATE");
-    state.snapshot = buildSnapshot();
-    renderWidget();
-    syncPollingState();
-  }
+		state.networkState = await getNetworkState(
+			resetDeadline ? "REFRESH_TAB_NETWORK_STATE" : "GET_TAB_NETWORK_STATE",
+		);
+		state.snapshot = buildSnapshot();
+		renderWidget();
+		syncPollingState();
+	}
 
-  async function syncNetworkAndRefresh(resetDeadline: boolean): Promise<void> {
-    if (!state.settings.enabled || shouldIgnoreCurrentPage(state.settings)) {
-      return;
-    }
+	async function syncNetworkAndRefresh(resetDeadline: boolean): Promise<void> {
+		if (!state.settings.enabled || shouldIgnoreCurrentPage(state.settings)) {
+			return;
+		}
 
-    if (!resetDeadline && !hasPendingChecks()) {
-      return;
-    }
+		if (!resetDeadline && !hasPendingChecks()) {
+			return;
+		}
 
-    state.networkState = await getNetworkState(resetDeadline ? "REFRESH_TAB_NETWORK_STATE" : "GET_TAB_NETWORK_STATE");
-    state.snapshot = buildSnapshot();
-    renderWidget();
-    syncPollingState();
-  }
+		state.networkState = await getNetworkState(
+			resetDeadline ? "REFRESH_TAB_NETWORK_STATE" : "GET_TAB_NETWORK_STATE",
+		);
+		state.snapshot = buildSnapshot();
+		renderWidget();
+		syncPollingState();
+	}
 
-  function buildSnapshot(): PageCheckSnapshot {
-    return {
-      bundles: buildBundleResults(),
-      classNames: buildClassResults(),
-      domIds: buildDomResults(),
-      attributes: buildAttributeResults(),
-      cookies: buildCookieResults(),
-      localStorageKeys: buildLocalStorageResults(),
-      lastRunAt: Date.now()
-    };
-  }
+	function buildSnapshot(): PageCheckSnapshot {
+		return {
+			bundles: buildBundleResults(),
+			classNames: buildClassResults(),
+			domIds: buildDomResults(),
+			attributes: buildAttributeResults(),
+			cookies: buildCookieResults(),
+			localStorageKeys: buildLocalStorageResults(),
+			lastRunAt: Date.now(),
+		};
+	}
 
-  function buildBundleResults(): BundleCheckResult[] {
-    const performanceEntries = performance.getEntriesByType("resource");
+	function buildBundleResults(): BundleCheckResult[] {
+		const performanceEntries = performance.getEntriesByType("resource");
 
-    return state.settings.bundles.map((bundleName) => {
-      const normalized = bundleName.toLowerCase();
-      const matchingHistory = state.networkState.history.filter((entry) => {
-        if (entry.resourceType === "main_frame" || entry.resourceType === "sub_frame") {
-          return false;
-        }
-        return entry.url.toLowerCase().includes(normalized);
-      });
-      const matchingCompleted = matchingHistory.find((entry) => entry.status === "completed");
-      const matchingError = matchingHistory.find((entry) => entry.status === "error");
-      const matchingActive = state.networkState.activeRequests.find((entry) => entry.url.toLowerCase().includes(normalized));
-      const matchingPerformanceEntry = performanceEntries.find((entry) => entry.name.toLowerCase().includes(normalized));
+		return state.settings.bundles.map((bundleName) => {
+			const normalized = bundleName.toLowerCase();
+			const matchingHistory = state.networkState.history.filter((entry) => {
+				if (entry.resourceType === "main_frame" || entry.resourceType === "sub_frame") {
+					return false;
+				}
+				return entry.url.toLowerCase().includes(normalized);
+			});
+			const matchingCompleted = matchingHistory.find((entry) => entry.status === "completed");
+			const matchingError = matchingHistory.find((entry) => entry.status === "error");
+			const matchingActive = state.networkState.activeRequests.find((entry) =>
+				entry.url.toLowerCase().includes(normalized),
+			);
+			const matchingPerformanceEntry = performanceEntries.find((entry) =>
+				entry.name.toLowerCase().includes(normalized),
+			);
 
-      if (matchingCompleted) {
-        return {
-          key: `bundle:${bundleName}`,
-          label: bundleName,
-          status: "pass",
-          explanation: HELP_COPY.bundles,
-          detail: `Loaded from ${truncate(matchingCompleted.url, 72)} in ${matchingCompleted.loadTimeMs ?? "?"} ms.`,
-          matchedUrl: matchingCompleted.url,
-          loadTimeMs: matchingCompleted.loadTimeMs
-        };
-      }
+			if (matchingCompleted) {
+				return {
+					key: `bundle:${bundleName}`,
+					label: bundleName,
+					status: "pass",
+					explanation: HELP_COPY.bundles,
+					detail: `Loaded from ${truncate(matchingCompleted.url, 72)} in ${matchingCompleted.loadTimeMs ?? "?"} ms.`,
+					matchedUrl: matchingCompleted.url,
+					loadTimeMs: matchingCompleted.loadTimeMs,
+				};
+			}
 
-      if (matchingPerformanceEntry) {
-        return {
-          key: `bundle:${bundleName}`,
-          label: bundleName,
-          status: "pass",
-          explanation: HELP_COPY.bundles,
-          detail: `Loaded from ${truncate(matchingPerformanceEntry.name, 72)} in ${Math.round(matchingPerformanceEntry.duration)} ms.`,
-          matchedUrl: matchingPerformanceEntry.name,
-          loadTimeMs: Math.round(matchingPerformanceEntry.duration)
-        };
-      }
+			if (matchingPerformanceEntry) {
+				return {
+					key: `bundle:${bundleName}`,
+					label: bundleName,
+					status: "pass",
+					explanation: HELP_COPY.bundles,
+					detail: `Loaded from ${truncate(matchingPerformanceEntry.name, 72)} in ${Math.round(matchingPerformanceEntry.duration)} ms.`,
+					matchedUrl: matchingPerformanceEntry.name,
+					loadTimeMs: Math.round(matchingPerformanceEntry.duration),
+				};
+			}
 
-      if (matchingActive) {
-        return {
-          key: `bundle:${bundleName}`,
-          label: bundleName,
-          status: "pending",
-          explanation: HELP_COPY.bundles,
-          detail: "We can see the script request in flight and are waiting for it to finish."
-        };
-      }
+			if (matchingActive) {
+				return {
+					key: `bundle:${bundleName}`,
+					label: bundleName,
+					status: "pending",
+					explanation: HELP_COPY.bundles,
+					detail: "We can see the script request in flight and are waiting for it to finish.",
+				};
+			}
 
-      if (matchingError && hasTimedOut()) {
-        return {
-          key: `bundle:${bundleName}`,
-          label: bundleName,
-          status: "fail",
-          explanation: HELP_COPY.bundles,
-          detail: `A matching request failed for ${truncate(matchingError.url, 72)}.`,
-          failureMessage: "Bundle request failed before the script finished loading."
-        };
-      }
+			if (matchingError && hasTimedOut()) {
+				return {
+					key: `bundle:${bundleName}`,
+					label: bundleName,
+					status: "fail",
+					explanation: HELP_COPY.bundles,
+					detail: `A matching request failed for ${truncate(matchingError.url, 72)}.`,
+					failureMessage: "Bundle request failed before the script finished loading.",
+				};
+			}
 
-      return {
-        key: `bundle:${bundleName}`,
-        label: bundleName,
-        status: hasTimedOut() ? "fail" : "pending",
-        explanation: HELP_COPY.bundles,
-        detail: hasTimedOut()
-          ? "Bundle not found in this page's network requests."
-          : "Still watching the page for this script request.",
-        failureMessage: hasTimedOut() ? "Bundle not found - the ad script may not be installed on this page." : undefined
-      };
-    });
-  }
+			return {
+				key: `bundle:${bundleName}`,
+				label: bundleName,
+				status: hasTimedOut() ? "fail" : "pending",
+				explanation: HELP_COPY.bundles,
+				detail: hasTimedOut()
+					? "Bundle not found in this page's network requests."
+					: "Still watching the page for this script request.",
+				failureMessage: hasTimedOut()
+					? "Bundle not found - the ad script may not be installed on this page."
+					: undefined,
+			};
+		});
+	}
 
-  function buildClassResults(): CheckResultBase[] {
-    return state.settings.classNames.map((className) => {
-      const count = document.getElementsByClassName(className).length;
-      const status = count > 0 ? "pass" : pendingOrFailedStatus();
-      return {
-        key: `class:${className}`,
-        label: className,
-        status,
-        explanation: HELP_COPY.classNames,
-        detail:
-          count > 0
-            ? `Found ${count} matching element${count === 1 ? "" : "s"} on the page.`
-            : status === "pending"
-              ? "Still scanning for this class name."
-              : "Class name not found anywhere in the page DOM.",
-        failureMessage:
-          status === "fail" ? "Class name not found - the expected ad markup may not have rendered." : undefined
-      };
-    });
-  }
+	function buildClassResults(): CheckResultBase[] {
+		return state.settings.classNames.map((className) => {
+			const count = document.getElementsByClassName(className).length;
+			const status = count > 0 ? "pass" : pendingOrFailedStatus();
+			return {
+				key: `class:${className}`,
+				label: className,
+				status,
+				explanation: HELP_COPY.classNames,
+				detail:
+					count > 0
+						? `Found ${count} matching element${count === 1 ? "" : "s"} on the page.`
+						: status === "pending"
+							? "Still scanning for this class name."
+							: "Class name not found anywhere in the page DOM.",
+				failureMessage:
+					status === "fail"
+						? "Class name not found - the expected ad markup may not have rendered."
+						: undefined,
+			};
+		});
+	}
 
-  function buildDomResults(): DomCheckResult[] {
-    return state.settings.domIds.map((domId) => {
-      const found = Boolean(document.getElementById(domId));
-      const status = found ? "pass" : pendingOrFailedStatus();
-      return {
-        key: `dom:${domId}`,
-        label: domId,
-        status,
-        explanation: HELP_COPY.domIds,
-        detail:
-          found
-            ? "Element found. Click this row to jump to it on the page."
-            : status === "pending"
-              ? "Still checking whether this page element appears."
-              : "Element ID not found in the current page.",
-        failureMessage: status === "fail" ? "Element not found on this page." : undefined,
-        targetId: domId,
-        found
-      };
-    });
-  }
+	function buildDomResults(): DomCheckResult[] {
+		return state.settings.domIds.map((domId) => {
+			const found = Boolean(document.getElementById(domId));
+			const status = found ? "pass" : pendingOrFailedStatus();
+			return {
+				key: `dom:${domId}`,
+				label: domId,
+				status,
+				explanation: HELP_COPY.domIds,
+				detail: found
+					? "Element found. Click this row to jump to it on the page."
+					: status === "pending"
+						? "Still checking whether this page element appears."
+						: "Element ID not found in the current page.",
+				failureMessage: status === "fail" ? "Element not found on this page." : undefined,
+				targetId: domId,
+				found,
+			};
+		});
+	}
 
-  function buildAttributeResults(): AttributeCheckResult[] {
-    return state.settings.attributes.map((attributeName) => {
-      const values = collectAttributeValues(attributeName);
-      const status = values.length > 0 ? "pass" : pendingOrFailedStatus();
-      const detail = values.length > 0
-        ? values
-            .map((valueSummary) => `<code class="adcheck-code-chip">${escapeHtml(valueSummary.value)}</code>${valueSummary.count > 1 ? ` <span class="adcheck-count-badge">×${valueSummary.count}</span>` : ""}`)
-            .join(" ")
-        : status === "pending"
-          ? "Still scanning the page for this attribute."
-          : "Attribute not found.";
-      const isHtml = values.length > 0;
+	function buildAttributeResults(): AttributeCheckResult[] {
+		return state.settings.attributes.map((attributeName) => {
+			const values = collectAttributeValues(attributeName);
+			const status = values.length > 0 ? "pass" : pendingOrFailedStatus();
+			const detail =
+				values.length > 0
+					? values
+							.map(
+								(valueSummary) =>
+									`<code class="adcheck-code-chip">${escapeHtml(valueSummary.value)}</code>${valueSummary.count > 1 ? ` <span class="adcheck-count-badge">×${valueSummary.count}</span>` : ""}`,
+							)
+							.join(" ")
+					: status === "pending"
+						? "Still scanning the page for this attribute."
+						: "Attribute not found.";
+			const isHtml = values.length > 0;
 
-      return {
-        key: `attribute:${attributeName}`,
-        label: attributeName,
-        status,
-        explanation: HELP_COPY.attributes,
-        detail,
-        detailIsHtml: isHtml,
-        failureMessage: status === "fail" ? "Attribute not found." : undefined,
-        attributeName,
-        values
-      };
-    });
-  }
+			return {
+				key: `attribute:${attributeName}`,
+				label: attributeName,
+				status,
+				explanation: HELP_COPY.attributes,
+				detail,
+				detailIsHtml: isHtml,
+				failureMessage: status === "fail" ? "Attribute not found." : undefined,
+				attributeName,
+				values,
+			};
+		});
+	}
 
-  function buildCookieResults(): StorageCheckResult[] {
-    const cookies = parseCookies();
+	function buildCookieResults(): StorageCheckResult[] {
+		const cookies = parseCookies();
 
-    return state.settings.cookies.map((cookieName) => {
-      const value = cookies.get(cookieName);
-      const status = value !== undefined ? "pass" : pendingOrFailedStatus();
-      return {
-        key: `cookie:${cookieName}`,
-        label: cookieName,
-        status,
-        explanation: HELP_COPY.cookies,
-        detail:
-          value !== undefined
-            ? `Cookie available: "${truncate(value, 54)}".`
-            : status === "pending"
-              ? "Still waiting to see whether this cookie appears."
-              : "Cookie not found.",
-        failureMessage:
-          status === "fail" ? "Cookie not found - the page may be missing required ad identity data." : undefined,
-        storageKind: "cookie",
-        valuePreview: value
-      };
-    });
-  }
+		return state.settings.cookies.map((cookieName) => {
+			const value = cookies.get(cookieName);
+			const status = value !== undefined ? "pass" : pendingOrFailedStatus();
+			return {
+				key: `cookie:${cookieName}`,
+				label: cookieName,
+				status,
+				explanation: HELP_COPY.cookies,
+				detail:
+					value !== undefined
+						? `Cookie available: "${truncate(value, 54)}".`
+						: status === "pending"
+							? "Still waiting to see whether this cookie appears."
+							: "Cookie not found.",
+				failureMessage:
+					status === "fail"
+						? "Cookie not found - the page may be missing required ad identity data."
+						: undefined,
+				storageKind: "cookie",
+				valuePreview: value,
+			};
+		});
+	}
 
-  function buildLocalStorageResults(): StorageCheckResult[] {
-    return state.settings.localStorageKeys.map((storageKey) => {
-      let value: string | null = null;
+	function buildLocalStorageResults(): StorageCheckResult[] {
+		return state.settings.localStorageKeys.map((storageKey) => {
+			let value: string | null = null;
 
-      try {
-        value = window.localStorage.getItem(storageKey);
-      } catch {
-        value = null;
-      }
+			try {
+				value = window.localStorage.getItem(storageKey);
+			} catch {
+				value = null;
+			}
 
-      const status = value !== null ? "pass" : pendingOrFailedStatus();
-      return {
-        key: `localStorage:${storageKey}`,
-        label: storageKey,
-        status,
-        explanation: HELP_COPY.localStorageKeys,
-        detail:
-          value !== null
-            ? `Stored value: "${truncate(value, 54)}".`
-            : status === "pending"
-              ? "Still checking page storage for this key."
-              : "Local storage key not found.",
-        failureMessage:
-          status === "fail" ? "Local storage key not found - the page may not have saved the expected ad state." : undefined,
-        storageKind: "localStorage",
-        valuePreview: value ?? undefined
-      };
-    });
-  }
+			const status = value !== null ? "pass" : pendingOrFailedStatus();
+			return {
+				key: `localStorage:${storageKey}`,
+				label: storageKey,
+				status,
+				explanation: HELP_COPY.localStorageKeys,
+				detail:
+					value !== null
+						? `Stored value: "${truncate(value, 54)}".`
+						: status === "pending"
+							? "Still checking page storage for this key."
+							: "Local storage key not found.",
+				failureMessage:
+					status === "fail"
+						? "Local storage key not found - the page may not have saved the expected ad state."
+						: undefined,
+				storageKind: "localStorage",
+				valuePreview: value ?? undefined,
+			};
+		});
+	}
 
-  function ensureWidget(): void {
-    if (state.root) {
-      return;
-    }
+	function ensureWidget(): void {
+		if (state.root) {
+			return;
+		}
 
-    const root = document.createElement("div");
-    root.id = ROOT_ID;
-    root.innerHTML = `
+		const root = document.createElement("div");
+		root.id = ROOT_ID;
+		root.innerHTML = `
       <div class="adcheck-widget">
         <button class="adcheck-pull-tab" id="adcheckToggleTab" type="button" aria-label="Show or hide AdCheck">
           <span>Open</span>
@@ -360,123 +381,127 @@
         </div>
       </div>
     `;
-    document.documentElement.appendChild(root);
-    state.root = root;
-    bindWidgetEvents();
-    renderWidget();
-  }
+		document.documentElement.appendChild(root);
+		state.root = root;
+		bindWidgetEvents();
+		renderWidget();
+	}
 
-  function teardownWidget(): void {
-    if (state.deadlineHandle) {
-      window.clearTimeout(state.deadlineHandle);
-      state.deadlineHandle = null;
-    }
+	function teardownWidget(): void {
+		if (state.deadlineHandle) {
+			window.clearTimeout(state.deadlineHandle);
+			state.deadlineHandle = null;
+		}
 
-    stopPolling();
+		stopPolling();
 
-    state.rowHints = {};
-    state.snapshot = createEmptySnapshot();
-    state.lastRenderSignature = "";
-    state.deadlineAt = null;
+		state.rowHints = {};
+		state.snapshot = createEmptySnapshot();
+		state.lastRenderSignature = "";
+		state.deadlineAt = null;
 
-    if (state.root) {
-      state.root.remove();
-      state.root = null;
-    }
-  }
+		if (state.root) {
+			state.root.remove();
+			state.root = null;
+		}
+	}
 
-  function syncPollingState(): void {
-    if (!state.settings.enabled) {
-      stopPolling();
-      return;
-    }
+	function syncPollingState(): void {
+		if (!state.settings.enabled) {
+			stopPolling();
+			return;
+		}
 
-    if (!hasPendingChecks()) {
-      stopPolling();
-      return;
-    }
+		if (!hasPendingChecks()) {
+			stopPolling();
+			return;
+		}
 
-    if (state.pollHandle) {
-      return;
-    }
+		if (state.pollHandle) {
+			return;
+		}
 
-    state.pollHandle = window.setInterval(() => {
-      void runChecks(false);
-    }, 1500);
-  }
+		state.pollHandle = window.setInterval(() => {
+			void runChecks(false);
+		}, 1500);
+	}
 
-  function stopPolling(): void {
-    if (state.pollHandle) {
-      window.clearInterval(state.pollHandle);
-      state.pollHandle = null;
-    }
-  }
+	function stopPolling(): void {
+		if (state.pollHandle) {
+			window.clearInterval(state.pollHandle);
+			state.pollHandle = null;
+		}
+	}
 
-  function renderWidget(): void {
-    if (!state.root || !state.settings.enabled) {
-      return;
-    }
+	function renderWidget(): void {
+		if (!state.root || !state.settings.enabled) {
+			return;
+		}
 
-    const signature = JSON.stringify({
-      collapsed: state.settings.widgetCollapsed,
-      hints: state.rowHints,
-      snapshot: {
-        bundles: state.snapshot.bundles,
-        classNames: state.snapshot.classNames,
-        domIds: state.snapshot.domIds,
-        attributes: state.snapshot.attributes,
-        cookies: state.snapshot.cookies,
-        localStorageKeys: state.snapshot.localStorageKeys
-      }
-    });
+		const signature = JSON.stringify({
+			collapsed: state.settings.widgetCollapsed,
+			hints: state.rowHints,
+			snapshot: {
+				bundles: state.snapshot.bundles,
+				classNames: state.snapshot.classNames,
+				domIds: state.snapshot.domIds,
+				attributes: state.snapshot.attributes,
+				cookies: state.snapshot.cookies,
+				localStorageKeys: state.snapshot.localStorageKeys,
+			},
+		});
 
-    if (signature === state.lastRenderSignature) {
-      return;
-    }
+		if (signature === state.lastRenderSignature) {
+			return;
+		}
 
-    const sections = [
-      renderGroup("Bundles", "Scripts we expect to load", state.snapshot.bundles),
-      renderGroup("Page elements", "IDs you can jump to on the page", state.snapshot.domIds),
-      renderGroup("Class names", "Page classes tied to ad rendering", state.snapshot.classNames),
-      renderGroup("Attributes", "Values pulled directly from the DOM", state.snapshot.attributes),
-      renderGroup("Cookies", "Browser cookies this setup may rely on", state.snapshot.cookies),
-      renderGroup("Local storage", "Page storage keys this setup may need", state.snapshot.localStorageKeys)
-    ].join("");
+		const sections = [
+			renderGroup("Bundles", "Scripts we expect to load", state.snapshot.bundles),
+			renderGroup("Page elements", "IDs you can jump to on the page", state.snapshot.domIds),
+			renderGroup("Class names", "Page classes tied to ad rendering", state.snapshot.classNames),
+			renderGroup("Attributes", "Values pulled directly from the DOM", state.snapshot.attributes),
+			renderGroup("Cookies", "Browser cookies this setup may rely on", state.snapshot.cookies),
+			renderGroup(
+				"Local storage",
+				"Page storage keys this setup may need",
+				state.snapshot.localStorageKeys,
+			),
+		].join("");
 
-    const widget = state.root.querySelector<HTMLElement>(".adcheck-widget");
-    const results = state.root.querySelector<HTMLElement>("#adcheckResults");
-    const badge = state.root.querySelector<HTMLElement>("#adcheckStatusBadge");
-    const toggleLabel = state.root.querySelector<HTMLElement>("#adcheckToggleTab span");
+		const widget = state.root.querySelector<HTMLElement>(".adcheck-widget");
+		const results = state.root.querySelector<HTMLElement>("#adcheckResults");
+		const badge = state.root.querySelector<HTMLElement>("#adcheckStatusBadge");
+		const toggleLabel = state.root.querySelector<HTMLElement>("#adcheckToggleTab span");
 
-    widget?.classList.toggle("is-collapsed", state.settings.widgetCollapsed);
-    if (results) {
-      results.innerHTML = sections;
-    }
-    if (badge) {
-      const passing = countPassingChecks();
-      const total = countTotalChecks();
-      const allPass = passing === total && total > 0;
-      badge.textContent = `${passing}/${total} clear`;
-      badge.classList.toggle("is-all-pass", allPass);
-      void updateActionSuccessState(allPass);
-    }
-    if (toggleLabel) {
-      toggleLabel.textContent = state.settings.widgetCollapsed ? "Open" : "Hide";
-    }
+		widget?.classList.toggle("is-collapsed", state.settings.widgetCollapsed);
+		if (results) {
+			results.innerHTML = sections;
+		}
+		if (badge) {
+			const passing = countPassingChecks();
+			const total = countTotalChecks();
+			const allPass = passing === total && total > 0;
+			badge.textContent = `${passing}/${total} clear`;
+			badge.classList.toggle("is-all-pass", allPass);
+			void updateActionSuccessState(allPass);
+		}
+		if (toggleLabel) {
+			toggleLabel.textContent = state.settings.widgetCollapsed ? "Open" : "Hide";
+		}
 
-    bindResultEvents();
-    state.lastRenderSignature = signature;
-  }
+		bindResultEvents();
+		state.lastRenderSignature = signature;
+	}
 
-  function renderGroup(title: string, description: string, results: CheckResultBase[]): string {
-    if (results.length === 0) {
-      return "";
-    }
-    const passedCount = results.filter((result) => result.status === "pass").length;
-    const allPass = passedCount === results.length;
-    const metaClass = allPass ? "adcheck-group-meta is-all-pass" : "adcheck-group-meta";
+	function renderGroup(title: string, description: string, results: CheckResultBase[]): string {
+		if (results.length === 0) {
+			return "";
+		}
+		const passedCount = results.filter((result) => result.status === "pass").length;
+		const allPass = passedCount === results.length;
+		const metaClass = allPass ? "adcheck-group-meta is-all-pass" : "adcheck-group-meta";
 
-    return `
+		return `
       <section class="adcheck-group">
         <div class="adcheck-group-heading">
           <h3 class="adcheck-group-title">
@@ -493,24 +518,28 @@
         </div>
       </section>
     `;
-  }
+	}
 
-  function renderResult(result: CheckResultBase): string {
-    const rowClass = `adcheck-result-row is-${result.status}${isDomResult(result) ? " is-clickable" : ""}`;
-    const statusIcon = result.status === "pass" ? "✓" : result.status === "fail" ? "×" : "";
-    const hint = state.rowHints[result.key];
-    const domAction = isDomResult(result) && result.found
-      ? `<button class="adcheck-dom-jump" data-dom-id="${escapeAttribute(result.targetId)}" type="button">↗ Jump to element</button>`
-      : "";
-    const isHtmlDetail = (result as AttributeCheckResult & { detailIsHtml?: boolean }).detailIsHtml === true;
-    const visibleDetail = result.failureMessage
-      ? escapeHtml(result.failureMessage)
-      : isHtmlDetail
-        ? result.detail
-        : escapeHtml(result.detail);
-    const detailClass = result.failureMessage ? "adcheck-result-detail is-failure" : "adcheck-result-detail";
+	function renderResult(result: CheckResultBase): string {
+		const rowClass = `adcheck-result-row is-${result.status}${isDomResult(result) ? " is-clickable" : ""}`;
+		const statusIcon = result.status === "pass" ? "✓" : result.status === "fail" ? "×" : "";
+		const hint = state.rowHints[result.key];
+		const domAction =
+			isDomResult(result) && result.found
+				? `<button class="adcheck-dom-jump" data-dom-id="${escapeAttribute(result.targetId)}" type="button">↗ Jump to element</button>`
+				: "";
+		const isHtmlDetail =
+			(result as AttributeCheckResult & { detailIsHtml?: boolean }).detailIsHtml === true;
+		const visibleDetail = result.failureMessage
+			? escapeHtml(result.failureMessage)
+			: isHtmlDetail
+				? result.detail
+				: escapeHtml(result.detail);
+		const detailClass = result.failureMessage
+			? "adcheck-result-detail is-failure"
+			: "adcheck-result-detail";
 
-    return `
+		return `
       <div class="${rowClass}" ${isDomResult(result) ? `data-dom-result="${escapeAttribute(result.targetId)}"` : ""}>
         <div class="adcheck-status-icon is-${result.status}">${statusIcon}</div>
         <div class="adcheck-result-body">
@@ -528,325 +557,358 @@
         </div>
       </div>
     `;
-  }
+	}
 
+	function bindWidgetEvents(): void {
+		if (!state.root) {
+			return;
+		}
 
-  function bindWidgetEvents(): void {
-    if (!state.root) {
-      return;
-    }
+		state.root
+			.querySelector<HTMLButtonElement>("#adcheckRefreshButton")
+			?.addEventListener("click", () => {
+				void runChecks(true);
+			});
 
-    state.root.querySelector<HTMLButtonElement>("#adcheckRefreshButton")?.addEventListener("click", () => {
-      void runChecks(true);
-    });
+		state.root
+			.querySelector<HTMLButtonElement>("#adcheckToggleTab")
+			?.addEventListener("click", () => {
+				void persistCollapsedState(!state.settings.widgetCollapsed);
+			});
+	}
 
-    state.root.querySelector<HTMLButtonElement>("#adcheckToggleTab")?.addEventListener("click", () => {
-      void persistCollapsedState(!state.settings.widgetCollapsed);
-    });
-  }
+	function bindResultEvents(): void {
+		if (!state.root) {
+			return;
+		}
 
-  function bindResultEvents(): void {
-    if (!state.root) {
-      return;
-    }
+		for (const button of Array.from(
+			state.root.querySelectorAll<HTMLButtonElement>("[data-dom-id]"),
+		)) {
+			button.addEventListener("click", (event: Event) => {
+				event.stopPropagation();
+				void navigateToDomId(button.dataset.domId ?? "");
+			});
+		}
 
-    for (const button of Array.from(state.root.querySelectorAll<HTMLButtonElement>("[data-dom-id]"))) {
-      button.addEventListener("click", (event: Event) => {
-        event.stopPropagation();
-        void navigateToDomId(button.dataset.domId ?? "");
-      });
-    }
+		for (const row of Array.from(state.root.querySelectorAll<HTMLElement>("[data-dom-result]"))) {
+			row.addEventListener("click", () => {
+				void navigateToDomId(row.dataset.domResult ?? "");
+			});
+		}
+	}
 
-    for (const row of Array.from(state.root.querySelectorAll<HTMLElement>("[data-dom-result]"))) {
-      row.addEventListener("click", () => {
-        void navigateToDomId(row.dataset.domResult ?? "");
-      });
-    }
-  }
+	async function navigateToDomId(domId: string): Promise<void> {
+		if (!domId) {
+			return;
+		}
 
-  async function navigateToDomId(domId: string): Promise<void> {
-    if (!domId) {
-      return;
-    }
+		const target = document.getElementById(domId);
+		if (!target) {
+			setRowHint(`dom:${domId}`, "Element not found on this page.");
+			return;
+		}
 
-    const target = document.getElementById(domId);
-    if (!target) {
-      setRowHint(`dom:${domId}`, "Element not found on this page.");
-      return;
-    }
+		target.scrollIntoView({
+			behavior: "smooth",
+			block: "center",
+			inline: "nearest",
+		});
+		target.classList.add(HIGHLIGHT_CLASS);
+		window.setTimeout(() => {
+			target.classList.remove(HIGHLIGHT_CLASS);
+		}, 2000);
+	}
 
-    target.scrollIntoView({
-      behavior: "smooth",
-      block: "center",
-      inline: "nearest"
-    });
-    target.classList.add(HIGHLIGHT_CLASS);
-    window.setTimeout(() => {
-      target.classList.remove(HIGHLIGHT_CLASS);
-    }, 2000);
-  }
+	function setRowHint(key: string, message: string): void {
+		state.rowHints[key] = message;
+		renderWidget();
+		window.setTimeout(() => {
+			if (state.rowHints[key] === message) {
+				delete state.rowHints[key];
+				renderWidget();
+			}
+		}, 2000);
+	}
 
-  function setRowHint(key: string, message: string): void {
-    state.rowHints[key] = message;
-    renderWidget();
-    window.setTimeout(() => {
-      if (state.rowHints[key] === message) {
-        delete state.rowHints[key];
-        renderWidget();
-      }
-    }, 2000);
-  }
+	async function persistCollapsedState(nextCollapsed: boolean): Promise<void> {
+		const merged = {
+			...state.settings,
+			widgetCollapsed: nextCollapsed,
+		};
 
-  async function persistCollapsedState(nextCollapsed: boolean): Promise<void> {
-    const merged = {
-      ...state.settings,
-      widgetCollapsed: nextCollapsed
-    };
+		try {
+			await chrome.storage.sync.set({
+				[AdCheckShared.STORAGE_KEY]: merged,
+			});
+		} catch (error: unknown) {
+			if (isExtensionContextInvalidatedError(error)) {
+				return;
+			}
 
-    await chrome.storage.sync.set({
-      [AdCheckShared.STORAGE_KEY]: merged
-    });
-  }
+			throw error;
+		}
+	}
 
-  function scheduleDeadlineRender(): void {
-    if (state.deadlineHandle) {
-      window.clearTimeout(state.deadlineHandle);
-    }
+	function scheduleDeadlineRender(): void {
+		if (state.deadlineHandle) {
+			window.clearTimeout(state.deadlineHandle);
+		}
 
-    state.deadlineHandle = window.setTimeout(() => {
-      state.snapshot = buildSnapshot();
-      renderWidget();
-    }, AdCheckShared.DEFAULT_WAIT_MS + 50);
-  }
+		state.deadlineHandle = window.setTimeout(() => {
+			state.snapshot = buildSnapshot();
+			renderWidget();
+		}, AdCheckShared.DEFAULT_WAIT_MS + 50);
+	}
 
-  function pendingOrFailedStatus(): AdCheckShared.CheckStatus {
-    return hasTimedOut() ? "fail" : "pending";
-  }
+	function pendingOrFailedStatus(): AdCheckShared.CheckStatus {
+		return hasTimedOut() ? "fail" : "pending";
+	}
 
-  function hasTimedOut(): boolean {
-    return state.deadlineAt !== null && Date.now() >= state.deadlineAt;
-  }
+	function hasTimedOut(): boolean {
+		return state.deadlineAt !== null && Date.now() >= state.deadlineAt;
+	}
 
-  function parseCookies(): Map<string, string> {
-    const cookieMap = new Map<string, string>();
+	function parseCookies(): Map<string, string> {
+		const cookieMap = new Map<string, string>();
 
-    if (!document.cookie) {
-      return cookieMap;
-    }
+		let rawCookieString = "";
 
-    for (const rawPair of document.cookie.split(";")) {
-      const [name, ...rest] = rawPair.split("=");
-      cookieMap.set(name.trim(), decodeURIComponent(rest.join("=").trim()));
-    }
+		try {
+			rawCookieString = document?.cookie;
+		} catch {
+			return cookieMap;
+		}
 
-    return cookieMap;
-  }
+		if (!rawCookieString) {
+			return cookieMap;
+		}
 
-  function collectAttributeValues(attributeName: string): AdCheckShared.AttributeValueSummary[] {
-    const elements = document.querySelectorAll(`[${cssEscape(attributeName)}]`);
-    const counts = new Map<string, number>();
+		for (const rawPair of rawCookieString.split(";")) {
+			const [name, ...rest] = rawPair.split("=");
+			cookieMap.set(name.trim(), decodeURIComponent(rest.join("=").trim()));
+		}
 
-    for (const element of Array.from(elements)) {
-      const value = element.getAttribute(attributeName);
-      if (value === null) {
-        continue;
-      }
+		return cookieMap;
+	}
 
-      counts.set(value, (counts.get(value) ?? 0) + 1);
-    }
+	function collectAttributeValues(attributeName: string): AdCheckShared.AttributeValueSummary[] {
+		const elements = document.querySelectorAll(`[${cssEscape(attributeName)}]`);
+		const counts = new Map<string, number>();
 
-    return Array.from(counts.entries()).map(([value, count]) => ({
-      value,
-      count
-    }));
-  }
+		for (const element of Array.from(elements)) {
+			const value = element.getAttribute(attributeName);
+			if (value === null) {
+				continue;
+			}
 
-  function countPassingChecks(): number {
-    const allResults = [
-      ...state.snapshot.bundles,
-      ...state.snapshot.classNames,
-      ...state.snapshot.domIds,
-      ...state.snapshot.attributes,
-      ...state.snapshot.cookies,
-      ...state.snapshot.localStorageKeys
-    ];
+			counts.set(value, (counts.get(value) ?? 0) + 1);
+		}
 
-    return allResults.filter((result) => result.status === "pass").length;
-  }
+		return Array.from(counts.entries()).map(([value, count]) => ({
+			value,
+			count,
+		}));
+	}
 
-  function countTotalChecks(): number {
-    return (
-      state.snapshot.bundles.length +
-      state.snapshot.classNames.length +
-      state.snapshot.domIds.length +
-      state.snapshot.attributes.length +
-      state.snapshot.cookies.length +
-      state.snapshot.localStorageKeys.length
-    );
-  }
+	function countPassingChecks(): number {
+		const allResults = [
+			...state.snapshot.bundles,
+			...state.snapshot.classNames,
+			...state.snapshot.domIds,
+			...state.snapshot.attributes,
+			...state.snapshot.cookies,
+			...state.snapshot.localStorageKeys,
+		];
 
-  function hasPendingChecks(): boolean {
-    const allResults = [
-      ...state.snapshot.bundles,
-      ...state.snapshot.classNames,
-      ...state.snapshot.domIds,
-      ...state.snapshot.attributes,
-      ...state.snapshot.cookies,
-      ...state.snapshot.localStorageKeys
-    ];
+		return allResults.filter((result) => result.status === "pass").length;
+	}
 
-    return allResults.some((result) => result.status === "pending");
-  }
+	function countTotalChecks(): number {
+		return (
+			state.snapshot.bundles.length +
+			state.snapshot.classNames.length +
+			state.snapshot.domIds.length +
+			state.snapshot.attributes.length +
+			state.snapshot.cookies.length +
+			state.snapshot.localStorageKeys.length
+		);
+	}
 
-  function createEmptySnapshot(): PageCheckSnapshot {
-    return {
-      bundles: [],
-      classNames: [],
-      domIds: [],
-      attributes: [],
-      cookies: [],
-      localStorageKeys: [],
-      lastRunAt: Date.now()
-    };
-  }
+	function hasPendingChecks(): boolean {
+		const allResults = [
+			...state.snapshot.bundles,
+			...state.snapshot.classNames,
+			...state.snapshot.domIds,
+			...state.snapshot.attributes,
+			...state.snapshot.cookies,
+			...state.snapshot.localStorageKeys,
+		];
 
-  function shouldIgnoreCurrentPage(settings: Settings): boolean {
-    if (settings.ignoredDomains.length === 0) {
-      return false;
-    }
+		return allResults.some((result) => result.status === "pending");
+	}
 
-    const hostname = window.location.hostname.toLowerCase();
+	function createEmptySnapshot(): PageCheckSnapshot {
+		return {
+			bundles: [],
+			classNames: [],
+			domIds: [],
+			attributes: [],
+			cookies: [],
+			localStorageKeys: [],
+			lastRunAt: Date.now(),
+		};
+	}
 
-    return settings.ignoredDomains.some((entry) => matchesIgnoredDomain(entry, hostname));
-  }
+	function shouldIgnoreCurrentPage(settings: Settings): boolean {
+		if (settings.ignoredDomains.length === 0) {
+			return false;
+		}
 
-  function matchesIgnoredDomain(entry: string, hostname: string): boolean {
-    const regex = parseIgnoredDomainRegex(entry);
-    if (regex) {
-      regex.lastIndex = 0;
-      return regex.test(hostname);
-    }
+		const hostname = window.location.hostname.toLowerCase();
 
-    const normalizedDomain = normalizeIgnoredDomain(entry);
-    if (!normalizedDomain) {
-      return false;
-    }
+		return settings.ignoredDomains.some((entry) => matchesIgnoredDomain(entry, hostname));
+	}
 
-    return hostname === normalizedDomain || hostname.endsWith(`.${normalizedDomain}`);
-  }
+	function matchesIgnoredDomain(entry: string, hostname: string): boolean {
+		const regex = parseIgnoredDomainRegex(entry);
+		if (regex) {
+			regex.lastIndex = 0;
+			return regex.test(hostname);
+		}
 
-  function parseIgnoredDomainRegex(entry: string): RegExp | null {
-    const trimmed = entry.trim();
-    if (!trimmed) {
-      return null;
-    }
+		const normalizedDomain = normalizeIgnoredDomain(entry);
+		if (!normalizedDomain) {
+			return false;
+		}
 
-    const slashMatch = trimmed.match(/^\/(.+)\/([dgimsuvy]*)$/);
-    if (slashMatch) {
-      try {
-        return new RegExp(slashMatch[1], slashMatch[2]);
-      } catch {
-        return null;
-      }
-    }
+		return hostname === normalizedDomain || hostname.endsWith(`.${normalizedDomain}`);
+	}
 
-    if (!trimmed.startsWith("regex:")) {
-      if (!looksLikeRegexPattern(trimmed)) {
-        return null;
-      }
+	function parseIgnoredDomainRegex(entry: string): RegExp | null {
+		const trimmed = entry.trim();
+		if (!trimmed) {
+			return null;
+		}
 
-      try {
-        return new RegExp(trimmed, "i");
-      } catch {
-        return null;
-      }
-    }
+		const slashMatch = trimmed.match(/^\/(.+)\/([dgimsuvy]*)$/);
+		if (slashMatch) {
+			try {
+				return new RegExp(slashMatch[1], slashMatch[2]);
+			} catch {
+				return null;
+			}
+		}
 
-    try {
-      return new RegExp(trimmed.slice("regex:".length));
-    } catch {
-      return null;
-    }
-  }
+		if (!trimmed.startsWith("regex:")) {
+			if (!looksLikeRegexPattern(trimmed)) {
+				return null;
+			}
 
-  function normalizeIgnoredDomain(entry: string): string {
-    const trimmed = entry.trim().toLowerCase();
-    if (!trimmed) {
-      return "";
-    }
+			try {
+				return new RegExp(trimmed, "i");
+			} catch {
+				return null;
+			}
+		}
 
-    try {
-      return new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`).hostname.toLowerCase();
-    } catch {
-      return trimmed.replace(/^https?:\/\//, "").split("/")[0].split(":")[0].toLowerCase();
-    }
-  }
+		try {
+			return new RegExp(trimmed.slice("regex:".length));
+		} catch {
+			return null;
+		}
+	}
 
-  function looksLikeRegexPattern(value: string): boolean {
-    return /[|()[\]{}+*$^\\]/.test(value);
-  }
+	function normalizeIgnoredDomain(entry: string): string {
+		const trimmed = entry.trim().toLowerCase();
+		if (!trimmed) {
+			return "";
+		}
 
-  async function loadSettings(): Promise<Settings> {
-    const response = await sendMessage<{ ok: boolean; settings?: Settings }>({
-      type: "GET_SETTINGS"
-    });
+		try {
+			return new URL(
+				trimmed.includes("://") ? trimmed : `https://${trimmed}`,
+			).hostname.toLowerCase();
+		} catch {
+			return trimmed
+				.replace(/^https?:\/\//, "")
+				.split("/")[0]
+				.split(":")[0]
+				.toLowerCase();
+		}
+	}
 
-    return AdCheckShared.mergeSettings(response?.settings);
-  }
+	function looksLikeRegexPattern(value: string): boolean {
+		return /[|()[\]{}+*$^\\]/.test(value);
+	}
 
-  async function getNetworkState(messageType: "GET_TAB_NETWORK_STATE" | "REFRESH_TAB_NETWORK_STATE"): Promise<NetworkTabState> {
-    const response = await sendMessage<{ ok: boolean; state?: NetworkTabState }>({
-      type: messageType
-    });
+	async function loadSettings(): Promise<Settings> {
+		const response = await sendMessage<{ ok: boolean; settings?: Settings }>({
+			type: "GET_SETTINGS",
+		});
 
-    return response?.state ?? AdCheckShared.createEmptyTabState();
-  }
+		return AdCheckShared.mergeSettings(response?.settings);
+	}
 
-  async function sendMessage<ResponseType>(message: RuntimeMessage): Promise<ResponseType | null> {
-    try {
-      return await chrome.runtime.sendMessage(message);
-    } catch {
-      return null;
-    }
-  }
+	async function getNetworkState(
+		messageType: "GET_TAB_NETWORK_STATE" | "REFRESH_TAB_NETWORK_STATE",
+	): Promise<NetworkTabState> {
+		const response = await sendMessage<{ ok: boolean; state?: NetworkTabState }>({
+			type: messageType,
+		});
 
-  async function updateActionSuccessState(allPass: boolean): Promise<void> {
-    await sendMessage({
-      type: "SET_ACTION_SUCCESS_STATE",
-      allPass
-    });
-  }
+		return response?.state ?? AdCheckShared.createEmptyTabState();
+	}
 
-  function cssEscape(value: string): string {
-    if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
-      return CSS.escape(value);
-    }
+	async function sendMessage<ResponseType>(message: RuntimeMessage): Promise<ResponseType | null> {
+		try {
+			return await chrome.runtime.sendMessage(message);
+		} catch {
+			return null;
+		}
+	}
 
-    return value.replace(/["\\\]]/g, "\\$&");
-  }
+	async function updateActionSuccessState(allPass: boolean): Promise<void> {
+		await sendMessage({
+			type: "SET_ACTION_SUCCESS_STATE",
+			allPass,
+		});
+	}
 
-  function escapeHtml(value: string): string {
-    return value
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#39;");
-  }
+	function cssEscape(value: string): string {
+		if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+			return CSS.escape(value);
+		}
 
-  function escapeAttribute(value: string): string {
-    return escapeHtml(value);
-  }
+		return value.replace(/["\\\]]/g, "\\$&");
+	}
 
-  function truncate(value: string, maxLength: number): string {
-    if (value.length <= maxLength) {
-      return value;
-    }
+	function escapeHtml(value: string): string {
+		return value
+			.replaceAll("&", "&amp;")
+			.replaceAll("<", "&lt;")
+			.replaceAll(">", "&gt;")
+			.replaceAll('"', "&quot;")
+			.replaceAll("'", "&#39;");
+	}
 
-    return `${value.slice(0, Math.max(0, maxLength - 1))}…`;
-  }
+	function escapeAttribute(value: string): string {
+		return escapeHtml(value);
+	}
 
-  function isDomResult(result: CheckResultBase): result is DomCheckResult {
-    return result.key.startsWith("dom:");
-  }
+	function isExtensionContextInvalidatedError(error: unknown): boolean {
+		return error instanceof Error && error.message.includes("Extension context invalidated");
+	}
+
+	function truncate(value: string, maxLength: number): string {
+		if (value.length <= maxLength) {
+			return value;
+		}
+
+		return `${value.slice(0, Math.max(0, maxLength - 1))}…`;
+	}
+
+	function isDomResult(result: CheckResultBase): result is DomCheckResult {
+		return result.key.startsWith("dom:");
+	}
 })();

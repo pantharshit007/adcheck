@@ -87,7 +87,8 @@ declare namespace AdCheckShared {
       | "GET_TAB_NETWORK_STATE"
       | "REFRESH_TAB_NETWORK_STATE"
       | "NETWORK_ACTIVITY_UPDATED"
-      | "SET_ACTION_SUCCESS_STATE";
+      | "SET_ACTION_SUCCESS_STATE"
+      | "SYNC_ACTION_STATE";
     allPass?: boolean;
   }
 }

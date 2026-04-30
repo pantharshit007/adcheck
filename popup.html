@@ -1,67 +1,150 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AdCheck Settings</title>
-    <link rel="stylesheet" href="styles.css" />
-  </head>
-  <body class="adcheck-popup-body">
-    <main class="adcheck-popup-app" id="app">
-      <section class="adcheck-popup-shell">
-        <header class="adcheck-popup-hero">
-          <div class="adcheck-popup-hero-top">
-            <div class="adcheck-popup-hero-copy">
-              <p class="adcheck-popup-kicker">Publisher page review</p>
-              <div class="adcheck-popup-headline">
-                <h1>AdCheck</h1>
-                <span class="adcheck-popup-chip">MV3</span>
-              </div>
-            </div>
-            <section class="adcheck-popup-toggle-card">
-              <p class="adcheck-section-title">Widget enabled</p>
-              <div class="adcheck-toggle-row">
-                <p class="adcheck-field-help">Runs on allowed pages.</p>
-                <label class="adcheck-toggle" aria-label="Enable AdCheck widget">
-                  <input type="checkbox" id="enabledToggle" />
-                  <span class="adcheck-toggle-track">
-                    <span class="adcheck-toggle-thumb"></span>
-                  </span>
-                </label>
-              </div>
-            </section>
-          </div>
-          <p class="adcheck-popup-copy">
-            Turn on the floating helper, choose what to verify, and save the checks your team uses every day. Ignored domains stay excluded.
-          </p>
-        </header>
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>AdCheck Settings</title>
+		<link rel="stylesheet" href="styles.css" />
+	</head>
+	<body class="adcheck-popup-body">
+		<main class="adcheck-popup-app" id="app">
+			<section class="adcheck-popup-shell">
+				<header class="adcheck-popup-hero">
+					<div class="adcheck-popup-hero-top">
+						<div class="adcheck-popup-hero-copy">
+							<p class="adcheck-popup-kicker">Publisher page review</p>
+							<div class="adcheck-popup-headline">
+								<h1>AdCheck</h1>
+							</div>
+						</div>
+						<div class="adcheck-popup-toggle-minimal">
+							<span class="adcheck-toggle-label" id="popupStateLabel">AdCheck Paused</span>
+							<label class="adcheck-toggle" aria-label="Enable AdCheck widget">
+								<input type="checkbox" id="enabledToggle" />
+								<span class="adcheck-toggle-track">
+									<span class="adcheck-toggle-thumb"></span>
+								</span>
+							</label>
+						</div>
+					</div>
+					<p class="adcheck-popup-copy">
+						Turn on the floating helper, choose what to verify, and save the checks your team uses
+						every day. Ignored domains stay excluded.
+					</p>
+				</header>
 
-        <section class="adcheck-popup-form" id="settingsForm"></section>
+				<section class="adcheck-popup-form" id="settingsForm"></section>
 
-        <footer class="adcheck-popup-actions">
-          <button class="adcheck-button adcheck-button-secondary" id="resetDefaultsButton" type="button">
-            Reset defaults
-          </button>
-          <button class="adcheck-button adcheck-button-primary" id="saveButton" type="button">
-            Save settings
-          </button>
-        </footer>
+				<section class="adcheck-popup-toolbar">
+					<div class="adcheck-popup-actions adcheck-popup-actions-top">
+						<button
+							class="adcheck-button adcheck-button-secondary adcheck-button-compact"
+							id="resetDefaultsButton"
+							type="button"
+						>
+							Reset defaults
+						</button>
+						<button
+							class="adcheck-button adcheck-button-primary adcheck-button-compact"
+							id="saveButton"
+							type="button"
+						>
+							Save settings
+						</button>
+					</div>
+				</section>
 
-        <div class="adcheck-popup-meta">
-          <p class="adcheck-popup-status" id="statusMessage" aria-live="polite"></p>
-          <a
-            class="adcheck-popup-source-link"
-            href="https://github.com/pantharshit007/AdCheck"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Source code
-          </a>
-        </div>
-      </section>
-    </main>
+				<section class="adcheck-config-section adcheck-import-export-section">
+					<div class="adcheck-config-section-header">
+						<div>
+							<p class="adcheck-section-title">Import or export</p>
+							<p class="adcheck-section-copy">
+								Need to back up your settings or share them with your team? Easy—just grab your
+								config from here.
+							</p>
+						</div>
+						<button
+							class="adcheck-button adcheck-button-secondary adcheck-button-compact"
+							id="toggleImportEditorButton"
+							type="button"
+						>
+							Show editor
+						</button>
+					</div>
 
-    <script src="shared/defaults.js"></script>
-    <script src="popup.js"></script>
-  </body>
+					<div class="adcheck-import-export-actions">
+						<input id="importFileInput" type="file" accept="application/json,.json" hidden />
+						<button
+							class="adcheck-button adcheck-button-secondary adcheck-button-compact"
+							id="importFileButton"
+							type="button"
+						>
+							Import file
+						</button>
+						<button
+							class="adcheck-button adcheck-button-secondary adcheck-button-compact"
+							id="exportButton"
+							type="button"
+						>
+							Export JSON
+						</button>
+					</div>
+
+					<button
+						class="adcheck-button adcheck-button-primary adcheck-button-compact adcheck-button-full"
+						id="applyImportButton"
+						type="button"
+					>
+						Apply pasted JSON
+					</button>
+
+					<div class="adcheck-import-export-editor is-hidden" id="importExportEditor">
+						<button
+							class="adcheck-import-editor-close"
+							id="closeImportEditorButton"
+							type="button"
+							aria-label="Close JSON editor"
+						>
+							×
+						</button>
+						<textarea
+							class="adcheck-import-export-input"
+							id="importExportInput"
+							rows="7"
+							spellcheck="false"
+							placeholder='{
+  "enabled": true,
+  "bundles": ["apInstreamBundle"],
+  "domIds": ["videoWrapperDiv"]
+}'
+						></textarea>
+					</div>
+				</section>
+
+				<div class="adcheck-popup-meta">
+					<p class="adcheck-popup-status" id="statusMessage" aria-live="polite"></p>
+					<a
+						class="adcheck-popup-source-link"
+						href="https://github.com/pantharshit007/AdCheck"
+						target="_blank"
+						rel="noreferrer"
+					>
+						<svg class="adcheck-source-icon" viewBox="0 0 1024 1024" aria-hidden="true">
+							<path
+								fill-rule="evenodd"
+								clip-rule="evenodd"
+								d="M8 0C3.58 0 0 3.58 0 8C0 11.54 2.29 14.53 5.47 15.59C5.87 15.66 6.02 15.42 6.02 15.21C6.02 15.02 6.01 14.39 6.01 13.72C4 14.09 3.48 13.23 3.32 12.78C3.23 12.55 2.84 11.84 2.5 11.65C2.22 11.5 1.82 11.13 2.49 11.12C3.12 11.11 3.57 11.7 3.72 11.94C4.44 13.15 5.59 12.81 6.05 12.6C6.12 12.08 6.33 11.73 6.56 11.53C4.78 11.33 2.92 10.64 2.92 7.58C2.92 6.71 3.23 5.99 3.74 5.43C3.66 5.23 3.38 4.41 3.82 3.31C3.82 3.31 4.49 3.1 6.02 4.13C6.66 3.95 7.34 3.86 8.02 3.86C8.7 3.86 9.38 3.95 10.02 4.13C11.55 3.09 12.22 3.31 12.22 3.31C12.66 4.41 12.38 5.23 12.3 5.43C12.81 5.99 13.12 6.7 13.12 7.58C13.12 10.65 11.25 11.33 9.47 11.53C9.76 11.78 10.01 12.26 10.01 13.01C10.01 14.08 10 14.94 10 15.21C10 15.42 10.15 15.67 10.55 15.59C13.71 14.53 16 11.53 16 8C16 3.58 12.42 0 8 0Z"
+								transform="scale(64)"
+								fill="currentColor"
+							></path>
+						</svg>
+						Source code
+					</a>
+				</div>
+			</section>
+		</main>
+
+		<script src="shared/defaults.js"></script>
+		<script src="popup.js"></script>
+	</body>
 </html>
