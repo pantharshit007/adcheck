@@ -134,6 +134,11 @@
           ok: true,
           settings: await ensureSettings()
         };
+      case "GET_USER_SCRIPT_STATUS":
+        return {
+          ok: true,
+          status: getUserScriptStatus()
+        };
       case "GET_TAB_NETWORK_STATE":
       case "REFRESH_TAB_NETWORK_STATE": {
         const tabId = sender.tab?.id;
@@ -163,9 +168,82 @@
       case "SYNC_ACTION_STATE":
         await syncActionIcons();
         return { ok: true };
+      case "EXECUTE_SITE_OVERRIDE_INLINE_SCRIPTS": {
+        const tabId = sender.tab?.id;
+        if (typeof tabId !== "number" || !Array.isArray(message.scriptCodes) || message.scriptCodes.length === 0) {
+          return { ok: false, error: "Missing tab or inline script payload." };
+        }
+
+        await executeSiteOverrideInlineScripts(tabId, sender.frameId, message.scriptCodes);
+        return { ok: true };
+      }
       default:
         return { ok: false, error: "Unsupported message." };
     }
+  }
+
+  async function executeSiteOverrideInlineScripts(
+    tabId: number,
+    frameId: number | undefined,
+    scriptCodes: string[]
+  ): Promise<void> {
+    const userScriptsApi = (chrome as typeof chrome & {
+      userScripts?: typeof chrome.userScripts;
+    }).userScripts;
+
+    if (!userScriptsApi || typeof userScriptsApi.execute !== "function") {
+      throw new Error(
+        "Inline override script blocks could not run. Markup and direct external script tags may still apply. Enable Allow User Scripts for AdCheck to run inline loader code."
+      );
+    }
+
+    await userScriptsApi.execute({
+      target: typeof frameId === "number" ? { tabId, frameIds: [frameId] } : { tabId },
+      injectImmediately: true,
+      js: scriptCodes.map((code) => ({ code })),
+      world: "USER_SCRIPT"
+    });
+  }
+
+  function getUserScriptStatus(): AdCheckShared.UserScriptStatus {
+    const chromeMajorVersion = parseChromeMajorVersion();
+    const userScriptsApi = (chrome as typeof chrome & {
+      userScripts?: typeof chrome.userScripts;
+    }).userScripts;
+
+    if (userScriptsApi && typeof userScriptsApi.execute === "function") {
+      return {
+        available: true,
+        chromeMajorVersion,
+        message: ""
+      };
+    }
+
+    if (chromeMajorVersion !== null && chromeMajorVersion >= 138) {
+      return {
+        available: false,
+        chromeMajorVersion,
+        message:
+          "This override includes inline script blocks. The page markup and any direct external script tags can still apply, but the inline loader code will not run until you enable Allow User Scripts in AdCheck's extension details and reload the extension."
+      };
+    }
+
+    return {
+      available: false,
+      chromeMajorVersion,
+      message:
+        "This override includes inline script blocks. The page markup and any direct external script tags can still apply, but the inline loader code needs Chrome userScripts support. Update Chrome or enable Developer mode, then reload AdCheck."
+    };
+  }
+
+  function parseChromeMajorVersion(): number | null {
+    const match = navigator.userAgent.match(/Chrome\/(\d+)/);
+    if (!match) {
+      return null;
+    }
+
+    const parsed = Number.parseInt(match[1], 10);
+    return Number.isFinite(parsed) ? parsed : null;
   }
 
   async function handleBeforeRequest(details: WebRequestLike): Promise<void> {

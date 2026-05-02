@@ -12,7 +12,10 @@ _ignore this for now_
 
 ---
 
-- [x] add option to export/import a pre-configured json file or in text input box to fill all the input box.
-- [x] we should move the save and reset part to top part somewhere, what if the list gets too large and they move to the bottom its bad ux.
-- [x] increase the width of the div panel the last attribute tool tip is clipping
-- [x] when the extension is disabled show a gray logo.
+- [x] current implementation of Hiding the pannel similar to accordion style is very bad, need to improve that. _(fade-up animation on editor reveal; chevron accordion on settings sections)_
+- [x] currently if the user clicks on delete overide, it deletes it saves it and hide the details, it shouldn't move to hide detils phase yet. _(editor stays open after delete)_
+- [x] Also, the implementaion of Enable Overide checkbox and the placement selector is wierd, improve that the checkbox shows native checked state and same for selector make it suit more to the ui and polished. _(custom toggle + styled select wrapper with chevron)_
+- [x] we can also put the selected element info in a code block of sort i think this will make it more visible and understandable for the user. _(selection shown in monospace code block)_
+- [x] since all other panels are multi input oriented they too can get huge in height alone if muliple cases are added, for ex lets say in the bundle panel if we have 5 bundles then the panel will be very long, so we can also implement the accordion style for all panels apart from import/export panel since it has its own implementation. One thing to note we dont need to add hide/show details ui for these a simple click to show details and click again to hide details will do the work, we can also add a small icon to indicate that the element is clickable and has more details to show. _(chevron accordion per section; count badge; starts expanded only when has values)_
+
+- [ ] just random thought, try styling the button with crazy broder and shadows `adcheck-button`.

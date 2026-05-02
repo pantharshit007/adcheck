@@ -2,6 +2,8 @@
 
 namespace AdCheckShared {
   export const STORAGE_KEY = "adcheck-settings";
+  export const SITE_OVERRIDE_STORAGE_KEY = "adcheck-site-overrides";
+  export const SITE_PICK_SELECTION_PREFIX = "adcheck-site-pick-selection:";
   export const TAB_STATE_PREFIX = "adcheck-tab-state:";
   export const MAX_NETWORK_HISTORY = 200;
   export const DEFAULT_WAIT_MS = 5000;
@@ -9,6 +11,7 @@ namespace AdCheckShared {
   export const DEFAULT_SETTINGS: Settings = {
     enabled: false,
     widgetCollapsed: false,
+    widgetSide: "right",
     bundles: ["apInstreamBundle"],
     classNames: [],
     domIds: ["videoWrapperDiv"],
@@ -67,6 +70,7 @@ namespace AdCheckShared {
     return {
       enabled: DEFAULT_SETTINGS.enabled,
       widgetCollapsed: DEFAULT_SETTINGS.widgetCollapsed,
+      widgetSide: DEFAULT_SETTINGS.widgetSide,
       bundles: [...DEFAULT_SETTINGS.bundles],
       classNames: [...DEFAULT_SETTINGS.classNames],
       domIds: [...DEFAULT_SETTINGS.domIds],
@@ -87,6 +91,7 @@ namespace AdCheckShared {
       enabled: typeof candidate.enabled === "boolean" ? candidate.enabled : defaults.enabled,
       widgetCollapsed:
         typeof candidate.widgetCollapsed === "boolean" ? candidate.widgetCollapsed : defaults.widgetCollapsed,
+      widgetSide: candidate.widgetSide === "left" ? "left" : defaults.widgetSide,
       bundles: normalizeEntries(candidate.bundles, defaults.bundles),
       classNames: normalizeEntries(candidate.classNames, defaults.classNames),
       domIds: normalizeEntries(candidate.domIds, defaults.domIds),
@@ -126,5 +131,59 @@ namespace AdCheckShared {
       activeRequests: [],
       lastUpdatedAt: null
     };
+  }
+
+  export function normalizeSiteOverrides(value: unknown): SiteOverrideRule[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    const overrides: SiteOverrideRule[] = [];
+    for (const entry of value) {
+      if (!entry || typeof entry !== "object") {
+        continue;
+      }
+
+      const candidate = entry as Partial<SiteOverrideRule>;
+      const hostname = typeof candidate.hostname === "string" ? candidate.hostname.trim().toLowerCase() : "";
+      const selector = typeof candidate.selector === "string" ? candidate.selector.trim() : "";
+      const htmlSnippet = typeof candidate.htmlSnippet === "string" ? candidate.htmlSnippet.trim() : "";
+      const placement = normalizePlacement(candidate.placement);
+      const enabled = typeof candidate.enabled === "boolean" ? candidate.enabled : true;
+      const updatedAt = typeof candidate.updatedAt === "number" ? candidate.updatedAt : Date.now();
+
+      if (!hostname || !selector || !htmlSnippet) {
+        continue;
+      }
+
+      overrides.push({
+        hostname,
+        selector,
+        placement,
+        htmlSnippet,
+        enabled,
+        updatedAt
+      });
+    }
+
+    return overrides.sort((left, right) => right.updatedAt - left.updatedAt);
+  }
+
+  export function normalizePlacement(value: unknown): SiteOverridePlacement {
+    return value === "beforebegin" || value === "afterbegin" || value === "beforeend" || value === "afterend"
+      ? value
+      : "afterend";
+  }
+
+  export function findSiteOverrideForHostname(
+    overrides: SiteOverrideRule[],
+    hostname: string
+  ): SiteOverrideRule | null {
+    const normalizedHostname = hostname.trim().toLowerCase();
+    return overrides.find((entry) => entry.hostname === normalizedHostname) ?? null;
+  }
+
+  export function sitePickSelectionStorageKey(hostname: string): string {
+    return `${SITE_PICK_SELECTION_PREFIX}${hostname.trim().toLowerCase()}`;
   }
 }

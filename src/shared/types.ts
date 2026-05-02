@@ -1,9 +1,34 @@
 declare namespace AdCheckShared {
   type CheckStatus = "pending" | "pass" | "fail";
+  type SiteOverridePlacement = "beforebegin" | "afterbegin" | "beforeend" | "afterend";
+
+  interface SiteOverrideRule {
+    hostname: string;
+    selector: string;
+    placement: SiteOverridePlacement;
+    htmlSnippet: string;
+    enabled: boolean;
+    updatedAt: number;
+  }
+
+  interface SitePickerSelection {
+    hostname: string;
+    selector: string;
+    tagName: string;
+    dimensionsLabel: string;
+    updatedAt: number;
+  }
+
+  interface UserScriptStatus {
+    available: boolean;
+    chromeMajorVersion: number | null;
+    message: string;
+  }
 
   interface Settings {
     enabled: boolean;
     widgetCollapsed: boolean;
+    widgetSide: "left" | "right";
     bundles: string[];
     classNames: string[];
     domIds: string[];
@@ -43,6 +68,7 @@ declare namespace AdCheckShared {
     status: CheckStatus;
     explanation: string;
     detail: string;
+    detailIsHtml?: boolean;
     failureMessage?: string;
   }
 
@@ -86,9 +112,14 @@ declare namespace AdCheckShared {
       | "GET_SETTINGS"
       | "GET_TAB_NETWORK_STATE"
       | "REFRESH_TAB_NETWORK_STATE"
+      | "GET_USER_SCRIPT_STATUS"
       | "NETWORK_ACTIVITY_UPDATED"
       | "SET_ACTION_SUCCESS_STATE"
-      | "SYNC_ACTION_STATE";
+      | "SYNC_ACTION_STATE"
+      | "START_SITE_PICKER"
+      | "CANCEL_SITE_PICKER"
+      | "EXECUTE_SITE_OVERRIDE_INLINE_SCRIPTS";
     allPass?: boolean;
+    scriptCodes?: string[];
   }
 }

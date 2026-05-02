@@ -10,6 +10,12 @@
 	type AttributeCheckResult = AdCheckShared.AttributeCheckResult;
 	type StorageCheckResult = AdCheckShared.StorageCheckResult;
 	type RuntimeMessage = AdCheckShared.RuntimeMessage;
+	type SiteOverrideRule = AdCheckShared.SiteOverrideRule;
+	type SitePickerSelection = AdCheckShared.SitePickerSelection;
+	type PreparedSiteOverride = {
+		inlineScriptCodes: string[];
+		nodes: Node[];
+	};
 
 	const pageWindow = window as Window & {
 		__ADCHECK_BOOTSTRAPPED__?: boolean;
@@ -17,6 +23,9 @@
 
 	const ROOT_ID = "adcheck-root";
 	const HIGHLIGHT_CLASS = "adcheck-target-highlight";
+	const PICKER_OVERLAY_ID = "adcheck-picker-overlay";
+	const PICKER_LABEL_ID = "adcheck-picker-label";
+	const APPLIED_OVERRIDE_ATTRIBUTE = "data-adcheck-site-override";
 	const HELP_COPY = {
 		bundles: "Checks whether the ad script made a network request on this page.",
 		classNames: "Looks through the page for elements using this CSS class name.",
@@ -36,6 +45,13 @@
 		pollHandle: number | null;
 		rowHints: Record<string, string>;
 		lastRenderSignature: string;
+		activeSiteOverride: SiteOverrideRule | null;
+		siteOverrideObserver: MutationObserver | null;
+		pickerActive: boolean;
+		pickerHoveredElement: Element | null;
+		pickerMoveHandler: ((event: MouseEvent) => void) | null;
+		pickerClickHandler: ((event: MouseEvent) => void) | null;
+		pickerKeyHandler: ((event: KeyboardEvent) => void) | null;
 	} = {
 		settings: AdCheckShared.cloneDefaultSettings(),
 		snapshot: createEmptySnapshot(),
@@ -46,6 +62,13 @@
 		pollHandle: null,
 		rowHints: {},
 		lastRenderSignature: "",
+		activeSiteOverride: null,
+		siteOverrideObserver: null,
+		pickerActive: false,
+		pickerHoveredElement: null,
+		pickerMoveHandler: null,
+		pickerClickHandler: null,
+		pickerKeyHandler: null,
 	};
 
 	if (!pageWindow.__ADCHECK_BOOTSTRAPPED__) {
@@ -54,6 +77,7 @@
 	}
 
 	async function bootstrap(): Promise<void> {
+		await syncSiteOverride();
 		await applySettings(await loadSettings());
 
 		chrome.runtime.onMessage.addListener((message: RuntimeMessage) => {
@@ -61,18 +85,367 @@
 				void syncNetworkAndRefresh(false);
 			}
 
+			if (message.type === "START_SITE_PICKER") {
+				void startSitePicker();
+			}
+
+			if (message.type === "CANCEL_SITE_PICKER") {
+				stopSitePicker();
+			}
+
 			return undefined;
 		});
 
 		chrome.storage.onChanged.addListener((changes, areaName) => {
-			if (areaName !== "sync" || !changes[AdCheckShared.STORAGE_KEY]) {
+			if (areaName === "sync" && changes[AdCheckShared.STORAGE_KEY]) {
+				const merged = AdCheckShared.mergeSettings(
+					changes[AdCheckShared.STORAGE_KEY].newValue as Partial<Settings>,
+				);
+				void applySettings(merged);
+			}
+
+			if (areaName === "local" && changes[AdCheckShared.SITE_OVERRIDE_STORAGE_KEY]) {
+				void syncSiteOverride();
+			}
+		});
+	}
+
+	async function syncSiteOverride(): Promise<void> {
+		const overrides = await loadSiteOverrides();
+		const nextOverride = AdCheckShared.findSiteOverrideForHostname(
+			overrides,
+			window.location.hostname,
+		);
+
+		if (!nextOverride || !nextOverride.enabled) {
+			teardownSiteOverride();
+			return;
+		}
+
+		state.activeSiteOverride = nextOverride;
+		applySiteOverrideSoon();
+	}
+
+	function applySiteOverrideSoon(): void {
+		if (!state.activeSiteOverride) {
+			return;
+		}
+
+		if (tryApplySiteOverride(state.activeSiteOverride)) {
+			stopSiteOverrideObserver();
+			return;
+		}
+
+		if (state.siteOverrideObserver) {
+			return;
+		}
+
+		state.siteOverrideObserver = new MutationObserver(() => {
+			if (!state.activeSiteOverride) {
 				return;
 			}
 
-			const merged = AdCheckShared.mergeSettings(
-				changes[AdCheckShared.STORAGE_KEY].newValue as Partial<Settings>,
-			);
-			void applySettings(merged);
+			if (tryApplySiteOverride(state.activeSiteOverride)) {
+				stopSiteOverrideObserver();
+			}
+		});
+		state.siteOverrideObserver.observe(document.documentElement, {
+			childList: true,
+			subtree: true,
+		});
+	}
+
+	function tryApplySiteOverride(rule: SiteOverrideRule): boolean {
+		const target = document.querySelector(rule.selector);
+		if (!(target instanceof Element)) {
+			return false;
+		}
+
+		if (document.querySelector(`[${APPLIED_OVERRIDE_ATTRIBUTE}="${cssEscape(rule.hostname)}"]`)) {
+			return true;
+		}
+
+		const preparedOverride = buildInjectedNodes(rule);
+		if (preparedOverride.nodes.length > 0) {
+			insertNodesAroundTarget(target, preparedOverride.nodes, rule.placement);
+		}
+
+		if (preparedOverride.inlineScriptCodes.length > 0) {
+			void executeInlineOverrideScripts(preparedOverride.inlineScriptCodes);
+		}
+
+		if (preparedOverride.nodes.length === 0 && preparedOverride.inlineScriptCodes.length === 0) {
+			return true;
+		}
+
+		target.setAttribute(APPLIED_OVERRIDE_ATTRIBUTE, rule.hostname);
+		return true;
+	}
+
+	function buildInjectedNodes(rule: SiteOverrideRule): PreparedSiteOverride {
+		const template = document.createElement("template");
+		template.innerHTML = rule.htmlSnippet.trim();
+		const preparedOverride: PreparedSiteOverride = {
+			inlineScriptCodes: [],
+			nodes: [],
+		};
+
+		for (const node of Array.from(template.content.childNodes)) {
+			const materializedNode = materializeNode(node, preparedOverride.inlineScriptCodes);
+			if (materializedNode) {
+				preparedOverride.nodes.push(materializedNode);
+			}
+		}
+
+		return preparedOverride;
+	}
+
+	function materializeNode(node: Node, inlineScriptCodes: string[]): Node | null {
+		if (node.nodeType === Node.TEXT_NODE) {
+			return document.createTextNode(node.textContent ?? "");
+		}
+
+		if (node.nodeType !== Node.ELEMENT_NODE) {
+			return null;
+		}
+
+		const source = node as HTMLElement;
+		if (source.tagName.toLowerCase() === "script") {
+			const sourceScript = source as HTMLScriptElement;
+			if (!sourceScript.src) {
+				const inlineCode = sourceScript.textContent?.trim() ?? "";
+				if (inlineCode) {
+					inlineScriptCodes.push(inlineCode);
+				}
+				return null;
+			}
+
+			const script = document.createElement("script");
+			for (const attribute of Array.from(source.attributes)) {
+				script.setAttribute(attribute.name, attribute.value);
+			}
+			script.setAttribute(APPLIED_OVERRIDE_ATTRIBUTE, window.location.hostname.toLowerCase());
+			return script;
+		}
+
+		const clone = document.createElement(source.tagName);
+		for (const attribute of Array.from(source.attributes)) {
+			clone.setAttribute(attribute.name, attribute.value);
+		}
+		clone.setAttribute(APPLIED_OVERRIDE_ATTRIBUTE, window.location.hostname.toLowerCase());
+		for (const child of Array.from(source.childNodes)) {
+			const materializedChild = materializeNode(child, inlineScriptCodes);
+			if (materializedChild) {
+				clone.appendChild(materializedChild);
+			}
+		}
+		return clone;
+	}
+
+	async function executeInlineOverrideScripts(scriptCodes: string[]): Promise<void> {
+		const response = await sendMessage<{ ok: boolean; error?: string }>({
+			type: "EXECUTE_SITE_OVERRIDE_INLINE_SCRIPTS",
+			scriptCodes,
+		});
+
+		if (response?.ok === false && response.error) {
+			console.warn(`AdCheck site override: ${response.error}`);
+		}
+	}
+
+	function insertNodesAroundTarget(
+		target: Element,
+		nodes: Node[],
+		placement: AdCheckShared.SiteOverridePlacement,
+	): void {
+		if (placement === "beforebegin" || placement === "afterend") {
+			const parent = target.parentNode;
+			if (!parent) {
+				return;
+			}
+
+			if (placement === "beforebegin") {
+				for (const node of nodes) {
+					parent.insertBefore(node, target);
+				}
+				return;
+			}
+
+			let reference: ChildNode | null = target.nextSibling;
+			for (const node of nodes) {
+				parent.insertBefore(node, reference);
+			}
+			return;
+		}
+
+		if (placement === "afterbegin") {
+			let reference: ChildNode | null = target.firstChild;
+			for (const node of nodes) {
+				target.insertBefore(node, reference);
+			}
+			return;
+		}
+
+		for (const node of nodes) {
+			target.appendChild(node);
+		}
+	}
+
+	function teardownSiteOverride(): void {
+		state.activeSiteOverride = null;
+		stopSiteOverrideObserver();
+	}
+
+	function stopSiteOverrideObserver(): void {
+		state.siteOverrideObserver?.disconnect();
+		state.siteOverrideObserver = null;
+	}
+
+	async function startSitePicker(): Promise<void> {
+		stopSitePicker();
+		state.pickerActive = true;
+		ensurePickerOverlay();
+
+		state.pickerMoveHandler = (event: MouseEvent) => {
+			const candidate = findPickableElement(event.target);
+			if (!candidate) {
+				return;
+			}
+
+			state.pickerHoveredElement = candidate;
+			updatePickerOverlay(candidate);
+		};
+
+		state.pickerClickHandler = (event: MouseEvent) => {
+			const candidate = findPickableElement(event.target);
+			if (!candidate) {
+				return;
+			}
+
+			event.preventDefault();
+			event.stopPropagation();
+			event.stopImmediatePropagation();
+			void persistPickedSelection(candidate);
+			stopSitePicker();
+		};
+
+		state.pickerKeyHandler = (event: KeyboardEvent) => {
+			if (event.key === "Escape") {
+				stopSitePicker();
+			}
+		};
+
+		document.addEventListener("mousemove", state.pickerMoveHandler, true);
+		document.addEventListener("click", state.pickerClickHandler, true);
+		document.addEventListener("keydown", state.pickerKeyHandler, true);
+	}
+
+	function stopSitePicker(): void {
+		if (state.pickerMoveHandler) {
+			document.removeEventListener("mousemove", state.pickerMoveHandler, true);
+		}
+		if (state.pickerClickHandler) {
+			document.removeEventListener("click", state.pickerClickHandler, true);
+		}
+		if (state.pickerKeyHandler) {
+			document.removeEventListener("keydown", state.pickerKeyHandler, true);
+		}
+
+		state.pickerActive = false;
+		state.pickerHoveredElement = null;
+		state.pickerMoveHandler = null;
+		state.pickerClickHandler = null;
+		state.pickerKeyHandler = null;
+		removePickerOverlay();
+	}
+
+	function ensurePickerOverlay(): void {
+		if (document.getElementById(PICKER_OVERLAY_ID)) {
+			return;
+		}
+
+		const overlay = document.createElement("div");
+		overlay.id = PICKER_OVERLAY_ID;
+		overlay.setAttribute(
+			"style",
+			[
+				"position:fixed",
+				"left:0",
+				"top:0",
+				"width:0",
+				"height:0",
+				"pointer-events:none",
+				"border:2px solid #c0392b",
+				"background:rgba(192, 57, 43, 0.12)",
+				"z-index:2147483646",
+				"box-sizing:border-box",
+			].join(";"),
+		);
+
+		const label = document.createElement("div");
+		label.id = PICKER_LABEL_ID;
+		label.setAttribute(
+			"style",
+			[
+				"position:absolute",
+				"top:-28px",
+				"left:0",
+				"padding:4px 8px",
+				"border-radius:999px",
+				"background:#c0392b",
+				"color:#fff",
+				"font:12px/1.2 sans-serif",
+				"white-space:nowrap",
+			].join(";"),
+		);
+		overlay.appendChild(label);
+		document.documentElement.appendChild(overlay);
+	}
+
+	function updatePickerOverlay(element: Element): void {
+		const overlay = document.getElementById(PICKER_OVERLAY_ID) as HTMLDivElement | null;
+		const label = document.getElementById(PICKER_LABEL_ID) as HTMLDivElement | null;
+		if (!overlay || !label) {
+			return;
+		}
+
+		const rect = element.getBoundingClientRect();
+		overlay.style.left = `${rect.left}px`;
+		overlay.style.top = `${rect.top}px`;
+		overlay.style.width = `${rect.width}px`;
+		overlay.style.height = `${rect.height}px`;
+		label.textContent = `${element.tagName.toLowerCase()} ${Math.round(rect.width)}x${Math.round(rect.height)}`;
+	}
+
+	function removePickerOverlay(): void {
+		document.getElementById(PICKER_OVERLAY_ID)?.remove();
+	}
+
+	function findPickableElement(candidate: EventTarget | null): Element | null {
+		if (!(candidate instanceof Element)) {
+			return null;
+		}
+
+		if (candidate.closest(`#${ROOT_ID}`) || candidate.closest(`#${PICKER_OVERLAY_ID}`)) {
+			return null;
+		}
+
+		return candidate;
+	}
+
+	async function persistPickedSelection(element: Element): Promise<void> {
+		const selector = buildSelector(element);
+		const rect = element.getBoundingClientRect();
+		const selection: SitePickerSelection = {
+			hostname: window.location.hostname.toLowerCase(),
+			selector,
+			tagName: element.tagName.toLowerCase(),
+			dimensionsLabel: `${Math.round(rect.width)} x ${Math.round(rect.height)}`,
+			updatedAt: Date.now(),
+		};
+
+		await chrome.storage.local.set({
+			[AdCheckShared.sitePickSelectionStorageKey(selection.hostname)]: selection,
 		});
 	}
 
@@ -375,7 +748,18 @@
                 <span class="adcheck-badge" id="adcheckStatusBadge">0/0 clear</span>
               </div>
             </div>
-            <button class="adcheck-refresh-btn" id="adcheckRefreshButton" type="button" aria-label="Refresh checks" title="Refresh checks">&#8635;</button>
+            <div class="adcheck-widget-actions">
+              <button
+                class="adcheck-refresh-btn adcheck-side-toggle-btn"
+                id="adcheckSideToggleButton"
+                type="button"
+                aria-label="Move AdCheck to the other side"
+                title="Move AdCheck to the other side"
+              >
+                ↔
+              </button>
+              <button class="adcheck-refresh-btn" id="adcheckRefreshButton" type="button" aria-label="Refresh checks" title="Refresh checks">&#8635;</button>
+            </div>
           </header>
           <div class="adcheck-group-list" id="adcheckResults"></div>
         </div>
@@ -388,6 +772,8 @@
 	}
 
 	function teardownWidget(): void {
+		stopSitePicker();
+
 		if (state.deadlineHandle) {
 			window.clearTimeout(state.deadlineHandle);
 			state.deadlineHandle = null;
@@ -440,6 +826,7 @@
 
 		const signature = JSON.stringify({
 			collapsed: state.settings.widgetCollapsed,
+			widgetSide: state.settings.widgetSide,
 			hints: state.rowHints,
 			snapshot: {
 				bundles: state.snapshot.bundles,
@@ -477,6 +864,8 @@
 		if (results) {
 			results.innerHTML = sections;
 		}
+		state.root.classList.toggle("is-left", state.settings.widgetSide === "left");
+		state.root.classList.toggle("is-right", state.settings.widgetSide !== "left");
 		if (badge) {
 			const passing = countPassingChecks();
 			const total = countTotalChecks();
@@ -575,6 +964,12 @@
 			?.addEventListener("click", () => {
 				void persistCollapsedState(!state.settings.widgetCollapsed);
 			});
+
+		state.root
+			.querySelector<HTMLButtonElement>("#adcheckSideToggleButton")
+			?.addEventListener("click", () => {
+				void persistWidgetSide(state.settings.widgetSide === "left" ? "right" : "left");
+			});
 	}
 
 	function bindResultEvents(): void {
@@ -635,6 +1030,25 @@
 		const merged = {
 			...state.settings,
 			widgetCollapsed: nextCollapsed,
+		};
+
+		try {
+			await chrome.storage.sync.set({
+				[AdCheckShared.STORAGE_KEY]: merged,
+			});
+		} catch (error: unknown) {
+			if (isExtensionContextInvalidatedError(error)) {
+				return;
+			}
+
+			throw error;
+		}
+	}
+
+	async function persistWidgetSide(nextSide: Settings["widgetSide"]): Promise<void> {
+		const merged = {
+			...state.settings,
+			widgetSide: nextSide,
 		};
 
 		try {
@@ -850,6 +1264,17 @@
 		return AdCheckShared.mergeSettings(response?.settings);
 	}
 
+	async function loadSiteOverrides(): Promise<SiteOverrideRule[]> {
+		try {
+			const result = await chrome.storage.local.get(AdCheckShared.SITE_OVERRIDE_STORAGE_KEY);
+			return AdCheckShared.normalizeSiteOverrides(
+				result[AdCheckShared.SITE_OVERRIDE_STORAGE_KEY] as SiteOverrideRule[] | undefined,
+			);
+		} catch {
+			return [];
+		}
+	}
+
 	async function getNetworkState(
 		messageType: "GET_TAB_NETWORK_STATE" | "REFRESH_TAB_NETWORK_STATE",
 	): Promise<NetworkTabState> {
@@ -881,6 +1306,61 @@
 		}
 
 		return value.replace(/["\\\]]/g, "\\$&");
+	}
+
+	function buildSelector(element: Element): string {
+		const htmlElement = element as HTMLElement;
+		if (htmlElement.id) {
+			return `#${cssEscape(htmlElement.id)}`;
+		}
+
+		const parts: string[] = [];
+		let current: Element | null = element;
+		while (current && current.nodeType === Node.ELEMENT_NODE && parts.length < 5) {
+			const segment = selectorSegment(current);
+			parts.unshift(segment);
+
+			const trialSelector = parts.join(" > ");
+			try {
+				if (document.querySelectorAll(trialSelector).length === 1) {
+					return trialSelector;
+				}
+			} catch {
+				// Keep building a safer fallback path.
+			}
+
+			current = current.parentElement;
+		}
+
+		return parts.join(" > ");
+	}
+
+	function selectorSegment(element: Element): string {
+		const htmlElement = element as HTMLElement;
+		const tagName = element.tagName.toLowerCase();
+		if (htmlElement.id) {
+			return `#${cssEscape(htmlElement.id)}`;
+		}
+
+		const classNames = Array.from(element.classList)
+			.filter((className) => !className.startsWith("adcheck-"))
+			.slice(0, 2)
+			.map((className) => `.${cssEscape(className)}`)
+			.join("");
+		if (classNames) {
+			return `${tagName}${classNames}`;
+		}
+
+		const siblings = element.parentElement
+			? Array.from(element.parentElement.children).filter(
+					(sibling) => sibling.tagName.toLowerCase() === tagName,
+				)
+			: [];
+		if (siblings.length <= 1) {
+			return tagName;
+		}
+
+		return `${tagName}:nth-of-type(${siblings.indexOf(element) + 1})`;
 	}
 
 	function escapeHtml(value: string): string {

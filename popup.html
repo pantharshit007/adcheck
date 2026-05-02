@@ -38,19 +38,144 @@
 				<section class="adcheck-popup-toolbar">
 					<div class="adcheck-popup-actions adcheck-popup-actions-top">
 						<button
-							class="adcheck-button adcheck-button-secondary adcheck-button-compact"
-							id="resetDefaultsButton"
-							type="button"
-						>
-							Reset defaults
-						</button>
-						<button
 							class="adcheck-button adcheck-button-primary adcheck-button-compact"
 							id="saveButton"
 							type="button"
 						>
 							Save settings
 						</button>
+						<button
+							class="adcheck-button adcheck-button-secondary adcheck-button-compact"
+							id="resetDefaultsButton"
+							type="button"
+						>
+							Reset defaults
+						</button>
+					</div>
+				</section>
+
+				<section class="adcheck-config-section adcheck-site-override-section">
+					<div class="adcheck-config-section-header">
+						<div>
+							<p class="adcheck-section-title">Current site override</p>
+							<p class="adcheck-section-copy" id="siteOverrideSiteLabel">
+								Choose an element on this page and save a tag snippet that should re-run on each
+								refresh for this site only.
+							</p>
+						</div>
+						<button
+							class="adcheck-button adcheck-button-secondary"
+							id="toggleSiteOverrideEditorButton"
+							type="button"
+						>
+							Show details
+						</button>
+					</div>
+
+					<div class="adcheck-site-override-meta">
+						<p class="adcheck-field-help" id="siteOverrideSelectionLabel">
+							No element selected yet.
+						</p>
+						<p
+							class="adcheck-field-help adcheck-site-override-warning is-hidden"
+							id="siteOverridePermissionMessage"
+						></p>
+					</div>
+
+					<div class="adcheck-site-override-editor is-hidden" id="siteOverrideEditor">
+						<div class="adcheck-site-override-actions">
+							<button
+								class="adcheck-button adcheck-button-secondary adcheck-button-compact adcheck-button-icon"
+								id="pickSiteElementButton"
+								type="button"
+							>
+								<svg
+									class="adcheck-btn-icon"
+									xmlns="http://www.w3.org/2000/svg"
+									width="14"
+									height="14"
+									viewBox="0 0 24 24"
+									fill="none"
+									aria-hidden="true"
+								>
+									<path
+										fill-rule="evenodd"
+										clip-rule="evenodd"
+										d="M15 2.0004C15.5523 2.0004 16 2.44811 16 3.0004V5.0004H18C18.5523 5.0004 19 5.44811 19 6.0004C19 6.55268 18.5523 7.0004 18 7.0004H16V9.0004C16 9.55268 15.5523 10.0004 15 10.0004C14.4477 10.0004 14 9.55268 14 9.0004V7.0004H12C11.4477 7.0004 11 6.55268 11 6.0004C11 5.44811 11.4477 5.0004 12 5.0004L14 5.0004V3.0004C14 2.44811 14.4477 2.0004 15 2.0004Z"
+										fill="currentColor"
+									/>
+									<path
+										d="M10.2384 4.22612L7.23382 1.56744C6.45074 0.874512 5.20099 1.38392 5.1437 2.4389L4.25136 18.8728C4.19034 19.9965 5.51725 20.6163 6.34581 19.8763L9.7092 16.8723L11.7767 21.9665C12.038 22.6104 12.7711 22.9175 13.4124 22.6595L15.2905 21.9042C15.9335 21.6456 16.2481 20.914 15.9861 20.2684L13.8825 15.0854L18.6572 14.4509C19.7199 14.3097 20.1353 12.9837 19.3255 12.2671L17.1241 10.3191C16.6828 11.0281 15.8965 11.5 15 11.5C13.6193 11.5 12.5 10.3807 12.5 9V8.5H12C10.6193 8.5 9.50002 7.38071 9.50002 6C9.50002 5.30653 9.78237 4.67901 10.2384 4.22612Z"
+										fill="currentColor"
+									/>
+								</svg>
+								Pick page element
+							</button>
+							<button
+								class="adcheck-button adcheck-button-secondary adcheck-button-compact"
+								id="clearSiteSelectionButton"
+								type="button"
+							>
+								Clear selection
+							</button>
+						</div>
+
+						<div class="adcheck-site-override-grid">
+							<div class="adcheck-inline-field">
+								<span class="adcheck-inline-field-label">Enable override</span>
+								<label
+									class="adcheck-toggle adcheck-override-toggle"
+									aria-label="Enable site override"
+								>
+									<input id="siteOverrideEnabledInput" type="checkbox" checked />
+									<span class="adcheck-toggle-track">
+										<span class="adcheck-toggle-thumb"></span>
+									</span>
+								</label>
+							</div>
+
+							<label class="adcheck-inline-field">
+								<span class="adcheck-inline-field-label">Placement</span>
+								<div class="adcheck-select-wrapper">
+									<select id="siteOverridePlacementSelect" class="adcheck-select-input">
+										<option value="beforebegin">Before element</option>
+										<option value="afterbegin">Inside element, first</option>
+										<option value="beforeend">Inside element, last</option>
+										<option value="afterend" selected>After element</option>
+									</select>
+									<span class="adcheck-select-arrow" aria-hidden="true">›</span>
+								</div>
+							</label>
+						</div>
+
+						<label class="adcheck-textarea-field" for="siteOverrideSnippetInput">
+							<span class="adcheck-inline-field-label">Tag snippet</span>
+							<textarea
+								class="adcheck-import-export-input adcheck-site-override-input"
+								id="siteOverrideSnippetInput"
+								rows="8"
+								spellcheck="false"
+								placeholder='<div id="videoWrapperDiv"></div>
+<script src="https://cdn.example.com/tag.js"></script>'
+							></textarea>
+						</label>
+
+						<div class="adcheck-site-override-actions">
+							<button
+								class="adcheck-button adcheck-button-primary adcheck-button-compact"
+								id="saveSiteOverrideButton"
+								type="button"
+							>
+								Save site override
+							</button>
+							<button
+								class="adcheck-button adcheck-button-secondary adcheck-button-compact"
+								id="deleteSiteOverrideButton"
+								type="button"
+							>
+								Delete site override
+							</button>
+						</div>
 					</div>
 				</section>
 
@@ -64,7 +189,7 @@
 							</p>
 						</div>
 						<button
-							class="adcheck-button adcheck-button-secondary adcheck-button-compact"
+							class="adcheck-button adcheck-button-secondary"
 							id="toggleImportEditorButton"
 							type="button"
 						>

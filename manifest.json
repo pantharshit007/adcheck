@@ -3,7 +3,7 @@
   "name": "AdCheck",
   "description": "Debug and verify ad tag implementations on publisher websites.",
   "version": "1.0.0",
-  "permissions": ["activeTab", "storage", "scripting", "webRequest", "tabs"],
+  "permissions": ["activeTab", "storage", "scripting", "webRequest", "tabs", "userScripts"],
   "host_permissions": ["http://*/*", "https://*/*"],
   "background": {
     "service_worker": "background.js"
@@ -22,7 +22,7 @@
       "matches": ["http://*/*", "https://*/*"],
       "js": ["shared/defaults.js", "content.js"],
       "css": ["styles.css"],
-      "run_at": "document_idle"
+      "run_at": "document_start"
     }
   ]
 }
