@@ -102,7 +102,7 @@
 }
 
 .adcheck-widget.is-collapsed {
-    transform: translateX(calc(100% + 15px));
+    transform: translateX(calc(100% + 20px));
     box-shadow: none;
 }
 
@@ -1084,17 +1084,20 @@
 }
 
 .adcheck-site-override-warning {
-    margin-top: 8px;
-    padding: 10px 12px;
-    border: 1px solid rgba(176, 106, 16, 0.22);
-    border-radius: 12px;
-    background: rgba(176, 106, 16, 0.08);
-    color: var(--adcheck-warning);
-    font-weight: 600;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-weight: 600;
 }
 
 .adcheck-site-override-warning.is-hidden {
-    display: none;
+  display: none;
+}
+
+.adcheck-site-override-warning.is-warning {
+  border: 1px solid rgba(176, 106, 16, 0.22);
+  background: rgba(176, 106, 16, 0.08);
+  color: var(--adcheck-warning);
 }
 
 .adcheck-site-override-actions {

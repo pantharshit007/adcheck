@@ -38,18 +38,18 @@
 				<section class="adcheck-popup-toolbar">
 					<div class="adcheck-popup-actions adcheck-popup-actions-top">
 						<button
-							class="adcheck-button adcheck-button-primary adcheck-button-compact"
-							id="saveButton"
-							type="button"
-						>
-							Save settings
-						</button>
-						<button
 							class="adcheck-button adcheck-button-secondary adcheck-button-compact"
 							id="resetDefaultsButton"
 							type="button"
 						>
 							Reset defaults
+						</button>
+						<button
+							class="adcheck-button adcheck-button-primary adcheck-button-compact"
+							id="saveButton"
+							type="button"
+						>
+							Save settings
 						</button>
 					</div>
 				</section>
@@ -155,25 +155,25 @@
 								id="siteOverrideSnippetInput"
 								rows="8"
 								spellcheck="false"
-								placeholder='<div id="videoWrapperDiv"></div>
-<script src="https://cdn.example.com/tag.js"></script>'
+								placeholder='<div id="ad-slot"></div>
+<script src="https://example.com/tag.js"></script>'
 							></textarea>
 						</label>
 
 						<div class="adcheck-site-override-actions">
-							<button
-								class="adcheck-button adcheck-button-primary adcheck-button-compact"
-								id="saveSiteOverrideButton"
-								type="button"
-							>
-								Save site override
-							</button>
 							<button
 								class="adcheck-button adcheck-button-secondary adcheck-button-compact"
 								id="deleteSiteOverrideButton"
 								type="button"
 							>
 								Delete site override
+							</button>
+							<button
+								class="adcheck-button adcheck-button-primary adcheck-button-compact"
+								id="saveSiteOverrideButton"
+								type="button"
+							>
+								Save site override
 							</button>
 						</div>
 					</div>
@@ -239,8 +239,8 @@
 							spellcheck="false"
 							placeholder='{
   "enabled": true,
-  "bundles": ["apInstreamBundle"],
-  "domIds": ["videoWrapperDiv"]
+  "bundles": ["adscript.js"],
+  "domIds": ["ad-container"]
 }'
 						></textarea>
 					</div>

@@ -137,7 +137,7 @@
       case "GET_USER_SCRIPT_STATUS":
         return {
           ok: true,
-          status: getUserScriptStatus()
+          status: await getUserScriptStatus()
         };
       case "GET_TAB_NETWORK_STATE":
       case "REFRESH_TAB_NETWORK_STATE": {
@@ -205,13 +205,9 @@
     });
   }
 
-  function getUserScriptStatus(): AdCheckShared.UserScriptStatus {
+  async function getUserScriptStatus(): Promise<AdCheckShared.UserScriptStatus> {
     const chromeMajorVersion = parseChromeMajorVersion();
-    const userScriptsApi = (chrome as typeof chrome & {
-      userScripts?: typeof chrome.userScripts;
-    }).userScripts;
-
-    if (userScriptsApi && typeof userScriptsApi.execute === "function") {
+    if (await isUserScriptsAvailable()) {
       return {
         available: true,
         chromeMajorVersion,
@@ -234,6 +230,15 @@
       message:
         "This override includes inline script blocks. The page markup and any direct external script tags can still apply, but the inline loader code needs Chrome userScripts support. Update Chrome or enable Developer mode, then reload AdCheck."
     };
+  }
+
+  async function isUserScriptsAvailable(): Promise<boolean> {
+    try {
+      await chrome.userScripts.getScripts();
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   function parseChromeMajorVersion(): number | null {
