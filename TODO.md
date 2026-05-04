@@ -20,3 +20,4 @@ _ignore this for now_
 
 - [ ] just random thought, try styling the button with crazy broder and shadows `adcheck-button`.
 - [ ] There is a bug here. On normal sites it looks fine, but on some sites the font breaks, which causes other things like the loader and the side swap button to move up and down when the user clicks on it. Check into it. [summitpost.org](https://www.summitpost.org/)
+- [ ] Fix styling for Dark Mode websites.

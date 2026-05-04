@@ -62,7 +62,7 @@ namespace AdCheckShared {
 			key: "ignoredDomains",
 			title: "Ignored domains",
 			description:
-				"Skip AdCheck on matching hostnames. Use example.com for domains or google|github\\.com for regex.",
+				"Skip AdCheck on matching hostnames. Supports both domain name and regex Exp.",
 			placeholder: "example.com or google|github\\.com",
 		},
 	] as const;
@@ -122,6 +122,78 @@ namespace AdCheckShared {
 		}
 
 		return Array.from(unique);
+	}
+
+	export function matchesIgnoredDomain(entry: string, hostname: string): boolean {
+		const regex = parseIgnoredDomainRegex(entry);
+		if (regex) {
+			regex.lastIndex = 0;
+			return regex.test(hostname);
+		}
+
+		const normalizedDomain = normalizeIgnoredDomain(entry);
+		if (!normalizedDomain) {
+			return false;
+		}
+
+		return hostname === normalizedDomain || hostname.endsWith(`.${normalizedDomain}`);
+	}
+
+	export function parseIgnoredDomainRegex(entry: string): RegExp | null {
+		const trimmed = entry.trim();
+		if (!trimmed) {
+			return null;
+		}
+
+		const slashMatch = trimmed.match(/^\/(.+)\/([dgimsuvy]*)$/);
+		if (slashMatch) {
+			try {
+				return new RegExp(slashMatch[1], slashMatch[2]);
+			} catch {
+				return null;
+			}
+		}
+
+		if (!trimmed.startsWith("regex:")) {
+			if (!looksLikeRegexPattern(trimmed)) {
+				return null;
+			}
+
+			try {
+				return new RegExp(trimmed, "i");
+			} catch {
+				return null;
+			}
+		}
+
+		try {
+			return new RegExp(trimmed.slice("regex:".length));
+		} catch {
+			return null;
+		}
+	}
+
+	export function normalizeIgnoredDomain(entry: string): string {
+		const trimmed = entry.trim().toLowerCase();
+		if (!trimmed) {
+			return "";
+		}
+
+		try {
+			return new URL(
+				trimmed.includes("://") ? trimmed : `https://${trimmed}`,
+			).hostname.toLowerCase();
+		} catch {
+			return trimmed
+				.replace(/^https?:\/\//, "")
+				.split("/")[0]
+				.split(":")[0]
+				.toLowerCase();
+		}
+	}
+
+	export function looksLikeRegexPattern(value: string): boolean {
+		return /[|()[\]{}+*$^\\]/.test(value);
 	}
 
 	export function tabStateStorageKey(tabId: number): string {

@@ -18,6 +18,9 @@
 		"resetDefaultsButton",
 	) as HTMLButtonElement | null;
 	const enabledToggle = document.getElementById("enabledToggle") as HTMLInputElement | null;
+	const ignoreSiteControl = document.getElementById("ignoreSiteControl") as HTMLLabelElement | null;
+	const ignoreSiteToggle = document.getElementById("ignoreSiteToggle") as HTMLInputElement | null;
+	const ignoreSiteLabel = document.getElementById("ignoreSiteLabel") as HTMLSpanElement | null;
 	const statusMessage = document.getElementById("statusMessage") as HTMLParagraphElement | null;
 	const popupStateLabel = document.getElementById("popupStateLabel") as HTMLParagraphElement | null;
 	const importExportInput = document.getElementById(
@@ -75,10 +78,12 @@
 		activeSite: ActiveSiteContext | null;
 		pickedSelection: SitePickerSelection | null;
 		userScriptStatus: UserScriptStatus | null;
+		currentSettings: Settings;
 	} = {
 		activeSite: null,
 		pickedSelection: null,
 		userScriptStatus: null,
+		currentSettings: AdCheckShared.cloneDefaultSettings(),
 	};
 
 	void initializePopup();
@@ -89,6 +94,9 @@
 			!saveButton ||
 			!resetDefaultsButton ||
 			!enabledToggle ||
+			!ignoreSiteControl ||
+			!ignoreSiteToggle ||
+			!ignoreSiteLabel ||
 			!statusMessage ||
 			!popupStateLabel ||
 			!importExportInput ||
@@ -116,11 +124,13 @@
 		}
 
 		const settings = await loadSettings();
+		popupState.currentSettings = settings;
 		renderSettingsForm(settings);
 		populateImportExportInput(settings);
 		setImportEditorVisible(false);
 		setSiteOverrideEditorVisible(false);
 		await initializeSiteOverridePanel();
+		renderIgnoreSiteControl(settings);
 
 		saveButton.addEventListener("click", () => {
 			void saveSettings();
@@ -128,6 +138,10 @@
 
 		enabledToggle.addEventListener("change", () => {
 			void persistEnabledState();
+		});
+
+		ignoreSiteToggle.addEventListener("change", () => {
+			void persistIgnoreSiteState();
 		});
 
 		exportButton.addEventListener("click", () => {
@@ -158,6 +172,7 @@
 			const defaults = AdCheckShared.cloneDefaultSettings();
 			renderSettingsForm(defaults);
 			populateImportExportInput(defaults);
+			renderIgnoreSiteControl(defaults);
 			void persistSettings(defaults, "Defaults restored.");
 		});
 
@@ -529,12 +544,89 @@
 			return;
 		}
 
+		popupState.currentSettings = settings;
 		enabledToggle.checked = settings.enabled;
 		popupStateLabel.textContent = settings.enabled ? "AdCheck Active" : "AdCheck Paused";
 		formRoot.innerHTML = AdCheckShared.SETTINGS_SECTIONS.map((section) =>
 			renderSection(section, settings),
 		).join("");
 		bindSectionActions();
+		renderIgnoreSiteControl(settings);
+	}
+
+	function renderIgnoreSiteControl(settings: Settings): void {
+		if (!ignoreSiteControl || !ignoreSiteToggle || !ignoreSiteLabel) {
+			return;
+		}
+
+		const activeSite = popupState.activeSite;
+		if (!activeSite) {
+			ignoreSiteLabel.textContent = "Current site unavailable";
+			ignoreSiteToggle.checked = false;
+			ignoreSiteToggle.disabled = true;
+			ignoreSiteControl.title = "Open a normal http or https page to ignore this site.";
+			ignoreSiteControl.setAttribute("aria-disabled", "true");
+			ignoreSiteControl.dataset.state = "unavailable";
+			return;
+		}
+
+		const hostname = activeSite.hostname;
+		const ignoredEntry = settings.ignoredDomains.find((entry) =>
+			AdCheckShared.matchesIgnoredDomain(entry, hostname),
+		);
+		const exactIgnored = settings.ignoredDomains.some(
+			(entry) => AdCheckShared.normalizeIgnoredDomain(entry) === hostname,
+		);
+		const isManagedByPattern = Boolean(ignoredEntry) && !exactIgnored;
+
+		ignoreSiteLabel.textContent = hostname;
+		ignoreSiteToggle.checked = Boolean(ignoredEntry);
+		ignoreSiteToggle.disabled = isManagedByPattern;
+		ignoreSiteControl.title = isManagedByPattern
+			? `Ignored by pattern: ${ignoredEntry}`
+			: `Ignore ${hostname}`;
+		ignoreSiteControl.setAttribute("aria-disabled", isManagedByPattern ? "true" : "false");
+		ignoreSiteControl.dataset.state = isManagedByPattern ? "pattern-locked" : "interactive";
+		ignoreSiteToggle.dataset.exactIgnored = exactIgnored ? "true" : "false";
+		ignoreSiteToggle.dataset.ignoredEntry = ignoredEntry ?? "";
+	}
+
+	async function persistIgnoreSiteState(): Promise<void> {
+		if (!ignoreSiteToggle || !popupState.activeSite) {
+			return;
+		}
+
+		const hostname = popupState.activeSite.hostname;
+		const settings = collectSettingsFromForm();
+		const ignoredEntry = settings.ignoredDomains.find((entry) =>
+			AdCheckShared.matchesIgnoredDomain(entry, hostname),
+		);
+		const exactIgnored = settings.ignoredDomains.some(
+			(entry) => AdCheckShared.normalizeIgnoredDomain(entry) === hostname,
+		);
+
+		if (ignoreSiteToggle.checked) {
+			if (!ignoredEntry) {
+				settings.ignoredDomains = [...settings.ignoredDomains, hostname];
+			}
+			await persistSettings(settings, `${hostname} added to ignored domains.`);
+			return;
+		}
+
+		if (exactIgnored) {
+			settings.ignoredDomains = settings.ignoredDomains.filter(
+				(entry) => AdCheckShared.normalizeIgnoredDomain(entry) !== hostname,
+			);
+			await persistSettings(settings, `${hostname} removed from ignored domains.`);
+			return;
+		}
+
+		ignoreSiteToggle.checked = true;
+		showStatus(
+			ignoredEntry
+				? `This site is already ignored by ${ignoredEntry}. Remove that rule in Ignored domains to re-enable it.`
+				: "This site is already ignored.",
+		);
 	}
 
 	function renderSection(section: SettingsSection, settings: Settings): string {
