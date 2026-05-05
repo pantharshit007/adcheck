@@ -64,6 +64,8 @@ AdCheck is a lightweight, framework-free Manifest V3 Chrome extension designed f
 
 This project is licensed under the [MIT License](LICENSE).
 
----
+## Privacy Policy
+
+Check out the [AdCheck Privacy Policy](PRIVACY.md) for more details.
 
 _*धन्यवाद*_
