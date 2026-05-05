@@ -1,5 +1,7 @@
 node_modules/
 dist/
+adcheck-extension-*.zip
+release/
 
 # Local environment and machine files
 .DS_Store

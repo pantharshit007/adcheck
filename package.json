@@ -6,7 +6,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc && node scripts/copy-static.mjs",
-    "generate:icons": "node scripts/generate-icons.mjs"
+    "generate:icons": "node scripts/generate-icons.mjs",
+    "prepackage": "npm run build",
+    "package": "node scripts/package-extension.mjs"
   },
   "devDependencies": {
     "chrome-types": "^0.1.376",
