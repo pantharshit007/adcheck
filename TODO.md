@@ -21,3 +21,5 @@ _ignore this for now_
 - [ ] just random thought, try styling the button with crazy broder and shadows `adcheck-button`.
 - [ ] There is a bug here. On normal sites it looks fine, but on some sites the font breaks, which causes other things like the loader and the side swap button to move up and down when the user clicks on it. Check into it. [summitpost.org](https://www.summitpost.org/)
 - [ ] Fix styling for Dark Mode websites.
+- [ ] add a CTA for feedback/issue -> github issue (also add a template .git)
+- [ ] we can set individual refresh count for each of checks: bundles [10], page element [5], class name [4], cookie [4], attribute [3], localstorage [5], now if anyone of the checks here are still failing we will refresh internally that many times in a constant period to ensure we won't miss just because the action was delayed. For ex: some time the network call is delayed but by that time our first time refresh check is already complete and user had to manually refresh it to check again.
