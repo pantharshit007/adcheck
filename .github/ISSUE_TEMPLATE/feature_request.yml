@@ -1,0 +1,33 @@
+name: ✨ Feature Request
+description: Suggest a new feature or improvement for AdCheck
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We'd love to hear your ideas. Share even a rough sketch if that's all you have.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Motivation
+      description: What problem does this feature solve, or what workflow does it improve?
+      placeholder: "I often need to …"
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the feature as you'd like to see it.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Have you tried any workarounds? Are there other ways to achieve this?
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Screenshots, mockups, links, or anything else that helps explain the idea.

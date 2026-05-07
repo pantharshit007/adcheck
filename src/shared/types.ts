@@ -25,6 +25,11 @@ declare namespace AdCheckShared {
     message: string;
   }
 
+  interface WindowGlobalEntry {
+    path: string;
+    awaitBundle: string;
+  }
+
   interface Settings {
     enabled: boolean;
     widgetCollapsed: boolean;
@@ -36,6 +41,7 @@ declare namespace AdCheckShared {
     cookies: string[];
     localStorageKeys: string[];
     ignoredDomains: string[];
+    windowGlobals: WindowGlobalEntry[];
   }
 
   interface NetworkHistoryEntry {
@@ -97,6 +103,13 @@ declare namespace AdCheckShared {
     valuePreview?: string;
   }
 
+  interface WindowGlobalCheckResult extends CheckResultBase {
+    path: string;
+    rawValue: string;
+    valueType: string;
+    isLargeObject: boolean;
+  }
+
   interface PageCheckSnapshot {
     bundles: BundleCheckResult[];
     classNames: CheckResultBase[];
@@ -104,7 +117,15 @@ declare namespace AdCheckShared {
     attributes: AttributeCheckResult[];
     cookies: StorageCheckResult[];
     localStorageKeys: StorageCheckResult[];
+    windowGlobals: WindowGlobalCheckResult[];
     lastRunAt: number;
+  }
+
+  interface WindowGlobalReadResult {
+    path: string;
+    type: string;
+    value: string;
+    error?: string;
   }
 
   interface RuntimeMessage {
@@ -118,8 +139,10 @@ declare namespace AdCheckShared {
       | "SYNC_ACTION_STATE"
       | "START_SITE_PICKER"
       | "CANCEL_SITE_PICKER"
-      | "EXECUTE_SITE_OVERRIDE_INLINE_SCRIPTS";
+      | "EXECUTE_SITE_OVERRIDE_INLINE_SCRIPTS"
+      | "READ_WINDOW_GLOBALS";
     allPass?: boolean;
     scriptCodes?: string[];
+    windowGlobalPaths?: string[];
   }
 }

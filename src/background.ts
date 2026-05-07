@@ -177,6 +177,15 @@
         await executeSiteOverrideInlineScripts(tabId, sender.frameId, message.scriptCodes);
         return { ok: true };
       }
+      case "READ_WINDOW_GLOBALS": {
+        const tabId = sender.tab?.id;
+        if (typeof tabId !== "number" || !Array.isArray(message.windowGlobalPaths) || message.windowGlobalPaths.length === 0) {
+          return { ok: false, error: "Missing tab or global paths." };
+        }
+
+        const results = await readWindowGlobals(tabId, sender.frameId, message.windowGlobalPaths);
+        return { ok: true, results };
+      }
       default:
         return { ok: false, error: "Unsupported message." };
     }
@@ -203,6 +212,118 @@
       js: scriptCodes.map((code) => ({ code })),
       world: "USER_SCRIPT"
     });
+  }
+
+  async function readWindowGlobals(
+    tabId: number,
+    frameId: number | undefined,
+    paths: string[]
+  ): Promise<AdCheckShared.WindowGlobalReadResult[]> {
+    const results: AdCheckShared.WindowGlobalReadResult[] = [];
+
+    for (const rawPath of paths) {
+      try {
+        const injectionResult = await (chrome.scripting.executeScript as unknown as (injection: Record<string, unknown>) => Promise<{ result?: unknown }[]>)({
+          target: typeof frameId === "number" ? { tabId, frameIds: [frameId] } : { tabId },
+          world: "MAIN",
+          func: (dotPath: string) => {
+            const MAX_SERIALIZED_LENGTH = 4000;
+
+            function safeSerialize(val: unknown, depth: number, seen: WeakSet<object>, indent: number): string {
+              if (val === null) return "null";
+              if (val === undefined) return "undefined";
+
+              const t = typeof val;
+              if (t === "string") return JSON.stringify(val);
+              if (t === "number" || t === "boolean") return String(val);
+              if (t === "bigint") return `${val}n`;
+              if (t === "symbol") return val.toString();
+              if (t === "function") return `[Function: ${(val as { name?: string }).name || "anonymous"}]`;
+
+              if (val instanceof HTMLElement) {
+                const tag = val.tagName?.toLowerCase() ?? "element";
+                const id = val.id ? `#${val.id}` : "";
+                const cls = val.className && typeof val.className === "string"
+                  ? `.${val.className.split(" ").filter(Boolean).slice(0, 2).join(".")}`
+                  : "";
+                return `[${tag}${id}${cls}]`;
+              }
+
+              if (val instanceof Node) {
+                return `[Node: ${val.nodeName}]`;
+              }
+
+              if (depth > 3) return Array.isArray(val) ? "[Array]" : "[Object]";
+
+              if (seen.has(val as object)) return "[Circular]";
+              seen.add(val as object);
+
+              const pad = "  ".repeat(indent + 1);
+              const closePad = "  ".repeat(indent);
+
+              try {
+                if (Array.isArray(val)) {
+                  if (val.length === 0) return "[]";
+                  const items = val.slice(0, 20).map((item) => `${pad}${safeSerialize(item, depth + 1, seen, indent + 1)}`);
+                  const suffix = val.length > 20 ? `\n${pad}// ...${val.length - 20} more items` : "";
+                  return `[\n${items.join(",\n")}${suffix}\n${closePad}]`;
+                }
+
+                const obj = val as Record<string, unknown>;
+                const allKeys = Object.keys(obj);
+                if (allKeys.length === 0) return "{}";
+                const keys = allKeys.slice(0, 30);
+                const pairs = keys.map((k) => `${pad}${JSON.stringify(k)}: ${safeSerialize(obj[k], depth + 1, seen, indent + 1)}`);
+                const suffix = allKeys.length > 30 ? `\n${pad}// ...${allKeys.length - 30} more keys` : "";
+                return `{\n${pairs.join(",\n")}${suffix}\n${closePad}}`;
+              } catch {
+                return "[Unserializable]";
+              }
+            }
+
+            try {
+              const keys = dotPath.replace(/^window\./, "").split(".");
+              let current: unknown = window;
+              for (const key of keys) {
+                if (current === null || current === undefined) break;
+                current = (current as Record<string, unknown>)[key];
+              }
+
+              const t = current === null ? "null"
+                : current === undefined ? "undefined"
+                : Array.isArray(current) ? "array"
+                : typeof current;
+
+              const serialized = safeSerialize(current, 0, new WeakSet(), 0);
+              const value = serialized.length > MAX_SERIALIZED_LENGTH
+                ? serialized.slice(0, MAX_SERIALIZED_LENGTH) + "…[truncated]"
+                : serialized;
+
+              return { path: dotPath, type: t, value, error: undefined };
+            } catch (e) {
+              return { path: dotPath, type: "error", value: "", error: String(e) };
+            }
+          },
+          args: [rawPath]
+        });
+
+        const frameResult = injectionResult?.[0]?.result as AdCheckShared.WindowGlobalReadResult | undefined;
+        if (frameResult) {
+          results.push(frameResult);
+        } else {
+          results.push({ path: rawPath, type: "error", value: "", error: "No result from page context." });
+        }
+      } catch (error: unknown) {
+        results.push({
+          path: rawPath,
+          type: "error",
+          value: "",
+          error: error instanceof Error ? error.message : "Failed to read window global."
+        });
+      }
+    }
+
+    return results;
   }
 
   async function getUserScriptStatus(): Promise<AdCheckShared.UserScriptStatus> {

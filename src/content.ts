@@ -9,6 +9,7 @@
 	type DomCheckResult = AdCheckShared.DomCheckResult;
 	type AttributeCheckResult = AdCheckShared.AttributeCheckResult;
 	type StorageCheckResult = AdCheckShared.StorageCheckResult;
+	type WindowGlobalCheckResult = AdCheckShared.WindowGlobalCheckResult;
 	type RuntimeMessage = AdCheckShared.RuntimeMessage;
 	type SiteOverrideRule = AdCheckShared.SiteOverrideRule;
 	type SitePickerSelection = AdCheckShared.SitePickerSelection;
@@ -33,6 +34,7 @@
 		attributes: "Finds every value used for this attribute anywhere in the page markup.",
 		cookies: "Verifies whether this browser cookie is available to the page.",
 		localStorageKeys: "Checks whether this page stored the key in local storage.",
+		windowGlobals: "Reads a value from the page's window object using dot-path access.",
 	} as const;
 
 	const state: {
@@ -480,7 +482,11 @@
 			resetDeadline ? "REFRESH_TAB_NETWORK_STATE" : "GET_TAB_NETWORK_STATE",
 		);
 		state.snapshot = buildSnapshot();
+		if (state.settings.windowGlobals.length > 0) {
+			state.snapshot.windowGlobals = await buildWindowGlobalResults();
+		}
 		renderWidget();
+
 		syncPollingState();
 	}
 
@@ -497,7 +503,11 @@
 			resetDeadline ? "REFRESH_TAB_NETWORK_STATE" : "GET_TAB_NETWORK_STATE",
 		);
 		state.snapshot = buildSnapshot();
+		if (state.settings.windowGlobals.length > 0) {
+			state.snapshot.windowGlobals = await buildWindowGlobalResults();
+		}
 		renderWidget();
+
 		syncPollingState();
 	}
 
@@ -509,8 +519,118 @@
 			attributes: buildAttributeResults(),
 			cookies: buildCookieResults(),
 			localStorageKeys: buildLocalStorageResults(),
+			windowGlobals: [],
 			lastRunAt: Date.now(),
 		};
+	}
+
+	async function buildWindowGlobalResults(): Promise<WindowGlobalCheckResult[]> {
+		const entries = state.settings.windowGlobals;
+		if (entries.length === 0) {
+			return [];
+		}
+
+		const results: WindowGlobalCheckResult[] = [];
+		const pathsToRead: string[] = [];
+		const pendingIndices: number[] = [];
+
+		for (let i = 0; i < entries.length; i++) {
+			const entry = entries[i];
+
+			if (entry.awaitBundle) {
+				const bundlePassed = state.snapshot.bundles.some(
+					(bundle) => bundle.label.toLowerCase() === entry.awaitBundle.toLowerCase() && bundle.status === "pass",
+				);
+
+				if (!bundlePassed) {
+					results.push({
+						key: `windowGlobal:${entry.path}`,
+						label: entry.path,
+						status: "pending",
+						explanation: HELP_COPY.windowGlobals,
+						detail: `Waiting for bundle "${entry.awaitBundle}" to load before reading this value.`,
+						path: entry.path,
+						rawValue: "",
+						valueType: "pending",
+						isLargeObject: false,
+					});
+					continue;
+				}
+			}
+
+			pathsToRead.push(entry.path);
+			pendingIndices.push(i);
+			results.push(null as unknown as WindowGlobalCheckResult);
+		}
+
+		if (pathsToRead.length > 0) {
+			const response = await sendMessage<{
+				ok: boolean;
+				results?: AdCheckShared.WindowGlobalReadResult[];
+				error?: string;
+			}>({
+				type: "READ_WINDOW_GLOBALS",
+				windowGlobalPaths: pathsToRead,
+			});
+
+			const readResults = response?.results ?? [];
+
+			for (let j = 0; j < pendingIndices.length; j++) {
+				const entryIndex = pendingIndices[j];
+				const entry = entries[entryIndex];
+				const read = readResults[j];
+
+				if (!read || read.error) {
+					results[entryIndex] = {
+						key: `windowGlobal:${entry.path}`,
+						label: entry.path,
+						status: hasTimedOut() ? "fail" : "pending",
+						explanation: HELP_COPY.windowGlobals,
+						detail: read?.error ?? "Could not read this window property.",
+						failureMessage: hasTimedOut() ? (read?.error ?? "Failed to read window property.") : undefined,
+						path: entry.path,
+						rawValue: "",
+						valueType: "error",
+						isLargeObject: false,
+					};
+					continue;
+				}
+
+				if (read.type === "undefined" || read.type === "null") {
+					results[entryIndex] = {
+						key: `windowGlobal:${entry.path}`,
+						label: entry.path,
+						status: hasTimedOut() ? "fail" : "pending",
+						explanation: HELP_COPY.windowGlobals,
+						detail: hasTimedOut()
+							? `Value is ${read.type}. The property may not exist or has not been set yet.`
+							: `Value is currently ${read.type}. Waiting to see if it gets set.`,
+						failureMessage: hasTimedOut() ? `Value is ${read.type} — property not found on window.` : undefined,
+						path: entry.path,
+						rawValue: read.type,
+						valueType: read.type,
+						isLargeObject: false,
+					};
+					continue;
+				}
+
+				const isLarge = read.value.length > 120;
+				results[entryIndex] = {
+					key: `windowGlobal:${entry.path}`,
+					label: entry.path,
+					status: "pass",
+					explanation: HELP_COPY.windowGlobals,
+					detail: read.value,
+					detailIsHtml: true,
+					path: entry.path,
+					rawValue: read.value,
+					valueType: read.type,
+					isLargeObject: isLarge,
+				};
+			}
+		}
+
+		return results.filter(Boolean);
 	}
 
 	function buildBundleResults(): BundleCheckResult[] {
@@ -835,6 +955,7 @@
 				attributes: state.snapshot.attributes,
 				cookies: state.snapshot.cookies,
 				localStorageKeys: state.snapshot.localStorageKeys,
+				windowGlobals: state.snapshot.windowGlobals,
 			},
 		});
 
@@ -853,6 +974,7 @@
 				"Page storage keys this setup may need",
 				state.snapshot.localStorageKeys,
 			),
+			renderWindowGlobalsGroup(state.snapshot.windowGlobals),
 		].join("");
 
 		const widget = state.root.querySelector<HTMLElement>(".adcheck-widget");
@@ -945,6 +1067,101 @@
           ${domAction}
         </div>
       </div>
+    `;
+	}
+
+	function renderWindowGlobalsGroup(results: WindowGlobalCheckResult[]): string {
+		if (results.length === 0) {
+			return "";
+		}
+
+		const passedCount = results.filter((result) => result.status === "pass").length;
+		const allPass = passedCount === results.length;
+		const metaClass = allPass ? "adcheck-group-meta is-all-pass" : "adcheck-group-meta";
+
+		const rows = results
+			.map((result) => {
+				const statusIcon = result.status === "pass" ? "✓" : result.status === "fail" ? "×" : "";
+				const hint = state.rowHints[result.key];
+				const typeBadge =
+					result.status === "pass" && result.valueType
+						? ` <span class="adcheck-type-badge">${escapeHtml(result.valueType)}</span>`
+						: "";
+
+				let valueBlock = "";
+				if (result.status === "pass") {
+					if (result.isLargeObject) {
+						// Build a readable summary line instead of truncating
+						let summary = result.valueType;
+						const firstLine = result.rawValue.split("\n")[0] ?? "";
+						if (result.valueType === "object") {
+							const keyCount = (result.rawValue.match(/^\s+"/gm) || []).length;
+							summary = keyCount > 0 ? `object · ${keyCount} keys` : "object";
+						} else if (result.valueType === "array") {
+							const itemCount = (result.rawValue.match(/^\s{2}[^\s/]/gm) || []).length;
+							summary = itemCount > 0 ? `array · ${itemCount} items` : "array";
+						} else {
+							summary = firstLine.length > 60 ? firstLine.slice(0, 60) + "…" : firstLine;
+						}
+
+						valueBlock = `
+              <div class="adcheck-global-summary">
+                <span class="adcheck-global-summary-label">${escapeHtml(summary)}</span>
+              </div>
+              <details class="adcheck-global-expand">
+                <summary class="adcheck-global-expand-btn">Show full value</summary>
+                <pre class="adcheck-global-value-full">${escapeHtml(result.rawValue)}</pre>
+              </details>`;
+					} else {
+						valueBlock = `<code class="adcheck-code-chip adcheck-global-code">${escapeHtml(result.rawValue)}</code>`;
+					}
+				}
+
+				const detailText =
+					result.failureMessage
+						? `<p class="adcheck-result-detail is-failure">${escapeHtml(result.failureMessage)}</p>`
+						: result.status !== "pass"
+							? `<p class="adcheck-result-detail">${escapeHtml(result.detail)}</p>`
+							: "";
+
+				return `
+          <div class="adcheck-result-row is-${result.status}">
+            <div class="adcheck-status-icon is-${result.status}">${statusIcon}</div>
+            <div class="adcheck-result-body">
+              <div class="adcheck-result-label-row">
+                <span class="adcheck-result-label">${escapeHtml(result.label)}</span>
+                <span class="adcheck-result-pill is-${result.status}">${escapeHtml(result.status)}</span>
+                ${typeBadge}
+                <button class="adcheck-info-btn" type="button" aria-label="What does this check?">
+                  <span class="adcheck-info-icon">i</span>
+                  <span class="adcheck-info-tooltip">${escapeHtml(result.explanation)}</span>
+                </button>
+              </div>
+              ${detailText}
+              ${valueBlock}
+              ${hint ? `<p class="adcheck-result-detail is-failure">${escapeHtml(hint)}</p>` : ""}
+            </div>
+          </div>
+        `;
+			})
+			.join("");
+
+		return `
+      <section class="adcheck-group">
+        <div class="adcheck-group-heading">
+          <h3 class="adcheck-group-title">
+            Window globals
+            <button class="adcheck-info-btn" type="button" aria-label="About this section">
+              <span class="adcheck-info-icon">i</span>
+              <span class="adcheck-info-tooltip">Values read from the page's window object</span>
+            </button>
+          </h3>
+          <div class="${metaClass}">${passedCount}/${results.length}</div>
+        </div>
+        <div class="adcheck-results">
+          ${rows}
+        </div>
+      </section>
     `;
 	}
 
@@ -1133,19 +1350,25 @@
 			...state.snapshot.attributes,
 			...state.snapshot.cookies,
 			...state.snapshot.localStorageKeys,
+			...state.snapshot.windowGlobals,
 		];
 
 		return allResults.filter((result) => result.status === "pass").length;
 	}
 
 	function countTotalChecks(): number {
+		const allResults: CheckResultBase[] = [
+			...state.snapshot.bundles,
+			...state.snapshot.classNames,
+			...state.snapshot.domIds,
+			...state.snapshot.attributes,
+			...state.snapshot.cookies,
+			...state.snapshot.localStorageKeys,
+			...state.snapshot.windowGlobals,
+		];
+
 		return (
-			state.snapshot.bundles.length +
-			state.snapshot.classNames.length +
-			state.snapshot.domIds.length +
-			state.snapshot.attributes.length +
-			state.snapshot.cookies.length +
-			state.snapshot.localStorageKeys.length
+			allResults.length
 		);
 	}
 
@@ -1157,6 +1380,7 @@
 			...state.snapshot.attributes,
 			...state.snapshot.cookies,
 			...state.snapshot.localStorageKeys,
+			...state.snapshot.windowGlobals,
 		];
 
 		return allResults.some((result) => result.status === "pending");
@@ -1170,6 +1394,7 @@
 			attributes: [],
 			cookies: [],
 			localStorageKeys: [],
+			windowGlobals: [],
 			lastRunAt: Date.now(),
 		};
 	}

@@ -116,7 +116,7 @@
     flex-direction: column;
     gap: 14px;
     padding: 18px 18px 16px;
-    max-height: calc(100vh - 36px);
+    max-height: min(600px, 70vh);
     overflow-y: auto;
     overflow-x: hidden;
     overscroll-behavior: contain;
@@ -734,6 +734,146 @@
     font-weight: 600;
 }
 
+/* Window globals — type badge */
+.adcheck-type-badge {
+    flex-shrink: 0;
+    padding: 1px 5px;
+    border-radius: 999px;
+    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    background: rgba(18, 33, 45, 0.06);
+    color: var(--adcheck-ink-soft);
+}
+
+/* Window globals — inline code value */
+.adcheck-global-code {
+    display: inline-block;
+    margin-top: 4px;
+    max-width: 100%;
+    overflow-wrap: break-word;
+    word-break: break-all;
+    white-space: pre-wrap;
+}
+
+.adcheck-global-summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 5px;
+}
+
+.adcheck-global-summary-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: rgba(18, 33, 45, 0.05);
+    border: 1px solid rgba(18, 33, 45, 0.08);
+    color: var(--adcheck-ink-soft);
+    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+/* Window globals — expandable details block */
+.adcheck-global-expand {
+    margin-top: 6px;
+}
+
+.adcheck-global-expand-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(192, 57, 43, 0.08);
+    color: var(--adcheck-accent);
+    font-size: 10px;
+    font-weight: 700;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+}
+
+.adcheck-global-expand-btn:hover {
+    background: rgba(192, 57, 43, 0.15);
+}
+
+.adcheck-global-expand-btn::-webkit-details-marker {
+    display: none;
+}
+
+.adcheck-global-value-full {
+    margin: 6px 0 0;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: rgba(18, 33, 45, 0.06);
+    border: 1px solid rgba(18, 33, 45, 0.1);
+    border-left: 3px solid rgba(192, 57, 43, 0.3);
+    color: var(--adcheck-ink);
+    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+    font-size: 10px;
+    line-height: 1.6;
+    white-space: pre;
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: 220px;
+    user-select: text;
+    cursor: text;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(192, 57, 43, 0.25) transparent;
+    tab-size: 2;
+}
+
+/* Window globals — popup settings panel */
+.adcheck-wg-entry-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.65fr) 38px;
+    gap: 8px;
+    align-items: center;
+}
+
+.adcheck-wg-select-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.adcheck-wg-select {
+    width: 100%;
+    min-height: 38px;
+    padding: 0 28px 0 10px;
+    border: 1px solid rgba(18, 33, 45, 0.11);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.95);
+    color: var(--adcheck-ink);
+    font: inherit;
+    font-size: 12px;
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+}
+
+.adcheck-wg-select:focus {
+    outline: 2px solid rgba(192, 57, 43, 0.2);
+    border-color: rgba(192, 57, 43, 0.45);
+}
+
+.adcheck-wg-select-arrow {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%) rotate(90deg);
+    color: var(--adcheck-ink-soft);
+    font-size: 14px;
+    pointer-events: none;
+    line-height: 1;
+}
+
 .adcheck-popup-body {
     min-width: 450px;
     margin: 0;
@@ -1335,6 +1475,20 @@
 
 .adcheck-popup-source-link:hover {
     text-decoration: underline;
+}
+
+.adcheck-popup-meta-links {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.adcheck-popup-meta-divider {
+    color: var(--adcheck-ink-soft);
+    font-size: 12px;
+    user-select: none;
+    opacity: 0.5;
 }
 
 .adcheck-toggle-card {

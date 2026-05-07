@@ -12,13 +12,14 @@ namespace AdCheckShared {
 		enabled: false,
 		widgetCollapsed: false,
 		widgetSide: "right",
-		bundles: [],
+		bundles: ["script.js"],
 		classNames: [],
 		domIds: [],
 		attributes: [],
 		cookies: [],
 		localStorageKeys: [],
 		ignoredDomains: [],
+		windowGlobals: [],
 	};
 
 	export const SETTINGS_SECTIONS = [
@@ -79,6 +80,7 @@ namespace AdCheckShared {
 			cookies: [...DEFAULT_SETTINGS.cookies],
 			localStorageKeys: [...DEFAULT_SETTINGS.localStorageKeys],
 			ignoredDomains: [...DEFAULT_SETTINGS.ignoredDomains],
+			windowGlobals: DEFAULT_SETTINGS.windowGlobals.map((entry) => ({ ...entry })),
 		};
 	}
 
@@ -102,6 +104,10 @@ namespace AdCheckShared {
 			cookies: normalizeEntries(candidate.cookies, defaults.cookies),
 			localStorageKeys: normalizeEntries(candidate.localStorageKeys, defaults.localStorageKeys),
 			ignoredDomains: normalizeEntries(candidate.ignoredDomains, defaults.ignoredDomains),
+			windowGlobals: normalizeWindowGlobals(
+				(candidate as Record<string, unknown>).windowGlobals,
+				defaults.windowGlobals,
+			),
 		};
 	}
 
@@ -265,5 +271,34 @@ namespace AdCheckShared {
 
 	export function sitePickSelectionStorageKey(hostname: string): string {
 		return `${SITE_PICK_SELECTION_PREFIX}${hostname.trim().toLowerCase()}`;
+	}
+
+	export function normalizeWindowGlobals(
+		value: unknown,
+		fallback: WindowGlobalEntry[] = [],
+	): WindowGlobalEntry[] {
+		if (!Array.isArray(value)) {
+			return fallback.map((entry) => ({ ...entry }));
+		}
+
+		const entries: WindowGlobalEntry[] = [];
+		for (const item of value) {
+			if (!item || typeof item !== "object") {
+				continue;
+			}
+
+			const candidate = item as Partial<WindowGlobalEntry>;
+			const path = typeof candidate.path === "string" ? candidate.path.trim() : "";
+			if (!path) {
+				continue;
+			}
+
+			entries.push({
+				path,
+				awaitBundle: typeof candidate.awaitBundle === "string" ? candidate.awaitBundle.trim() : "",
+			});
+		}
+
+		return entries;
 	}
 }

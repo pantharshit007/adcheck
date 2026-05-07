@@ -276,7 +276,6 @@
 			return;
 		}
 
-		// TODO 4: display selected element info as a styled code block
 		const targetLabel = selection.tagName ? `${selection.tagName} at ` : "";
 		const dimensions = selection.dimensionsLabel ? ` (${selection.dimensionsLabel})` : "";
 		const selectorText = `${targetLabel}${selection.selector}${dimensions}`;
@@ -392,8 +391,6 @@
 		siteOverrideEnabledInput.checked = true;
 		siteOverridePlacementSelect.value = "afterend";
 		siteOverrideSnippetInput.value = "";
-		// TODO 2: after delete, keep the editor open — don't collapse back to "Show details"
-		// setSiteOverrideEditorVisible(false)  <-- intentionally NOT closing the editor
 		void refreshUserScriptWarning("");
 		showStatus("Site override deleted.");
 	}
@@ -547,10 +544,21 @@
 		popupState.currentSettings = settings;
 		enabledToggle.checked = settings.enabled;
 		popupStateLabel.textContent = settings.enabled ? "AdCheck Active" : "AdCheck Paused";
-		formRoot.innerHTML = AdCheckShared.SETTINGS_SECTIONS.map((section) =>
-			renderSection(section, settings),
-		).join("");
+
+		// Insert the window globals section between "attributes" and "cookies".
+		const INSERT_AFTER_KEY = "attributes";
+		const allSections = AdCheckShared.SETTINGS_SECTIONS;
+		const insertIndex = allSections.findIndex((s) => s.key === INSERT_AFTER_KEY);
+		const before = allSections.slice(0, insertIndex + 1);
+		const after = allSections.slice(insertIndex + 1);
+		const windowGlobalsSection = renderWindowGlobalsSection(settings);
+		formRoot.innerHTML =
+			before.map((s) => renderSection(s, settings)).join("") +
+			windowGlobalsSection +
+			after.map((s) => renderSection(s, settings)).join("");
+
 		bindSectionActions();
+		bindWindowGlobalsActions();
 		renderIgnoreSiteControl(settings);
 	}
 
@@ -629,6 +637,7 @@
 		);
 	}
 
+	// TODO 6: Move this to either separate file or better integrate the html with the TS stringliterals aren't great for this
 	function renderSection(section: SettingsSection, settings: Settings): string {
 		const values = settings[section.key];
 		// Always start collapsed on open — user clicks to expand
@@ -703,7 +712,6 @@
 			});
 		}
 
-		// TODO 5: wire up accordion toggle for each section header
 		for (const header of Array.from(
 			formRoot.querySelectorAll<HTMLElement>("[data-accordion-toggle]"),
 		)) {
@@ -912,6 +920,13 @@
 			base.enabled = enabledToggle.checked;
 		}
 
+		// Preserve widget state that is managed by the content script, not the
+		// popup form. Without this, every save would reset the widget to open.
+		if (popupState.currentSettings) {
+			base.widgetCollapsed = popupState.currentSettings.widgetCollapsed;
+			base.widgetSide = popupState.currentSettings.widgetSide;
+		}
+
 		for (const section of AdCheckShared.SETTINGS_SECTIONS) {
 			const inputs = Array.from(
 				document.querySelectorAll<HTMLInputElement>(`input[data-section-key="${section.key}"]`),
@@ -921,6 +936,8 @@
 				[],
 			);
 		}
+
+		base.windowGlobals = collectWindowGlobalsFromForm();
 
 		return base;
 	}
@@ -1020,5 +1037,178 @@
 			.replaceAll(">", "&gt;")
 			.replaceAll('"', "&quot;")
 			.replaceAll("'", "&#39;");
+	}
+
+	// TODO 7: same as TODO 6
+	function renderWindowGlobalsSection(settings: Settings): string {
+		const entries = settings.windowGlobals;
+		const startExpanded = false;
+		const itemCount = entries.filter((entry) => entry.path.trim() !== "").length;
+		const countBadge =
+			itemCount > 0 ? `<span class="adcheck-section-count">${itemCount}</span>` : "";
+		// Read directly from settings rather than querying the DOM, because the
+		// form HTML hasn't been inserted yet at this point.
+		const bundleOptions = settings.bundles.filter((b) => b.trim().length > 0);
+
+		const rows = (entries.length > 0 ? entries : [{ path: "", awaitBundle: "" }])
+			.map(
+				(entry, index) => `
+          <div class="adcheck-wg-entry-row" data-wg-row="${index}">
+            <input
+              class="adcheck-entry-input"
+              type="text"
+              value="${escapeHtml(entry.path)}"
+              placeholder="e.g. window._pbjsGlobals"
+              data-wg-path
+            />
+            <div class="adcheck-wg-select-wrapper">
+              <select class="adcheck-wg-select" data-wg-bundle>
+                <option value="">Immediately</option>
+                ${bundleOptions
+									.map(
+										(bundle) =>
+											`<option value="${escapeHtml(bundle)}"${entry.awaitBundle === bundle ? " selected" : ""}>${escapeHtml(bundle)}</option>`,
+									)
+									.join("")}
+              </select>
+              <span class="adcheck-wg-select-arrow" aria-hidden="true">›</span>
+            </div>
+            <button class="adcheck-row-remove" type="button" data-wg-remove aria-label="Remove window global">×</button>
+          </div>
+        `,
+			)
+			.join("");
+
+		return `
+      <section class="adcheck-config-section${startExpanded ? " is-expanded" : ""}" data-section="windowGlobals">
+        <div class="adcheck-config-section-header adcheck-section-accordion-header" data-accordion-toggle="windowGlobals" role="button" tabindex="0" aria-expanded="${startExpanded}">
+          <div class="adcheck-section-header-left">
+            <div class="adcheck-section-title-row">
+              <p class="adcheck-section-title">Window globals</p>
+              ${countBadge}
+            </div>
+            <p class="adcheck-section-copy">Read values from the page's window object. Optionally wait for a bundle to load first.</p>
+          </div>
+          <div class="adcheck-section-header-right">
+            <button class="adcheck-add-button" type="button" data-wg-add>Add</button>
+            <span class="adcheck-section-chevron" aria-hidden="true">›</span>
+          </div>
+        </div>
+        <div class="adcheck-entry-list${startExpanded ? "" : " is-hidden"}" data-entry-list="windowGlobals">
+          ${rows}
+        </div>
+      </section>
+    `;
+	}
+
+	function bindWindowGlobalsActions(): void {
+		if (!formRoot) {
+			return;
+		}
+
+		// The accordion toggle is already wired by bindSectionActions (via
+		// [data-accordion-toggle]), so we only need to bind the custom Add
+		// and Remove buttons here.
+
+		const addButton = formRoot.querySelector<HTMLButtonElement>("[data-wg-add]");
+		if (addButton) {
+			addButton.addEventListener("click", (event) => {
+				event.stopPropagation();
+				expandSection("windowGlobals");
+				addWindowGlobalRow();
+			});
+		}
+
+		for (const removeButton of Array.from(
+			formRoot.querySelectorAll<HTMLButtonElement>("[data-wg-remove]"),
+		)) {
+			removeButton.addEventListener("click", () => {
+				removeWindowGlobalRow(removeButton);
+			});
+		}
+	}
+
+	function addWindowGlobalRow(): void {
+		if (!formRoot) {
+			return;
+		}
+
+		const list = formRoot.querySelector<HTMLElement>('[data-entry-list="windowGlobals"]');
+		if (!list) {
+			return;
+		}
+
+		const bundleOptions = getCurrentBundleOptions();
+		const wrapper = document.createElement("div");
+		wrapper.className = "adcheck-wg-entry-row";
+		wrapper.innerHTML = `
+      <input
+        class="adcheck-entry-input"
+        type="text"
+        value=""
+        placeholder="e.g. window._pbjsGlobals"
+        data-wg-path
+      />
+      <div class="adcheck-wg-select-wrapper">
+        <select class="adcheck-wg-select" data-wg-bundle>
+          <option value="">Immediately</option>
+          ${bundleOptions
+						.map((bundle) => `<option value="${escapeHtml(bundle)}">${escapeHtml(bundle)}</option>`)
+						.join("")}
+        </select>
+        <span class="adcheck-wg-select-arrow" aria-hidden="true">›</span>
+      </div>
+      <button class="adcheck-row-remove" type="button" data-wg-remove aria-label="Remove window global">×</button>
+    `;
+
+		list.appendChild(wrapper);
+		wrapper.querySelector<HTMLInputElement>("[data-wg-path]")?.focus();
+		wrapper.querySelector<HTMLButtonElement>("[data-wg-remove]")?.addEventListener("click", () => {
+			removeWindowGlobalRow(wrapper.querySelector<HTMLButtonElement>("[data-wg-remove]"));
+		});
+	}
+
+	function removeWindowGlobalRow(button: HTMLButtonElement | null): void {
+		if (!button) {
+			return;
+		}
+
+		const row = button.closest(".adcheck-wg-entry-row");
+		const list = button.closest('[data-entry-list="windowGlobals"]');
+		row?.remove();
+
+		if (list && list.children.length === 0) {
+			addWindowGlobalRow();
+		}
+	}
+
+	function collectWindowGlobalsFromForm(): AdCheckShared.WindowGlobalEntry[] {
+		const rows = Array.from(
+			document.querySelectorAll<HTMLElement>("[data-wg-row], .adcheck-wg-entry-row"),
+		);
+		const entries: AdCheckShared.WindowGlobalEntry[] = [];
+
+		for (const row of rows) {
+			const pathInput = row.querySelector<HTMLInputElement>("[data-wg-path]");
+			const bundleSelect = row.querySelector<HTMLSelectElement>("[data-wg-bundle]");
+			const path = pathInput?.value.trim() ?? "";
+			if (!path) {
+				continue;
+			}
+
+			entries.push({
+				path,
+				awaitBundle: bundleSelect?.value.trim() ?? "",
+			});
+		}
+
+		return entries;
+	}
+
+	function getCurrentBundleOptions(): string[] {
+		const inputs = Array.from(
+			document.querySelectorAll<HTMLInputElement>('input[data-section-key="bundles"]'),
+		);
+		return inputs.map((input) => input.value.trim()).filter((value) => value.length > 0);
 	}
 })();
