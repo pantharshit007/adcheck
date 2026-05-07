@@ -1,5 +1,7 @@
 # AdCheck
 
+![AdCheck Extension Overview](img/hero-image-pop-up.png)
+
 AdCheck is a lightweight, framework-free Manifest V3 Chrome extension designed for ad operations and developers to validate ad tag implementations on publisher websites. It provides real-time visibility into network requests, DOM elements, and custom script behaviors.
 
 ## Features
@@ -12,6 +14,7 @@ AdCheck is a lightweight, framework-free Manifest V3 Chrome extension designed f
 - **Configuration Management**:
   - Easily import/export settings as JSON.
   - Define custom bundles, script names, DOM IDs, CSS classes, and attributes to track.
+- **Window Globals Inspector**: Safely inspect and track values from the page's `window` object with support for deep-path access and "await bundle" dependencies.
 
 ## Tech Stack
 
