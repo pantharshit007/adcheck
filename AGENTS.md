@@ -52,6 +52,5 @@ When making code changes, prefer running `npm run typecheck` and `npm run build`
 
 ## Notes For Future Work
 
-- Console error monitoring is intentionally deferred; check `TODO.md` before implementing it.
 - The extension should respect persisted user settings, especially the global enable/disable state and widget collapsed state.
 - For widget bugs, review both `src/content.ts` and `styles.css` together since behavior depends on both DOM updates and CSS interaction rules.

@@ -61,6 +61,7 @@
 #adcheck-root,
 #adcheck-root * {
     box-sizing: border-box;
+    font-family: var(--adcheck-font-body) !important;
 }
 
 #adcheck-root {
@@ -68,7 +69,7 @@
     top: 18px;
     right: 18px;
     z-index: 2147483647;
-    font-family: var(--adcheck-font-body);
+    font-family: var(--adcheck-font-body) !important;
     color: var(--adcheck-ink);
     pointer-events: none;
 }
@@ -115,7 +116,7 @@
     display: flex;
     flex-direction: column;
     gap: 14px;
-    padding: 18px 18px 16px;
+    padding: 18px 12px 16px;
     max-height: min(600px, 70vh);
     overflow-y: auto;
     overflow-x: hidden;
@@ -201,7 +202,7 @@
 .adcheck-widget-title,
 .adcheck-popup-headline h1 {
     margin: 0;
-    font-family: var(--adcheck-font-display);
+    font-family: var(--adcheck-font-display) !important;
     font-size: 26px;
     font-weight: 600;
     letter-spacing: -0.02em;
@@ -358,7 +359,7 @@
 }
 
 .adcheck-group {
-    padding: 10px 12px;
+    padding: 8px;
     border: 1px solid var(--adcheck-line);
     border-radius: 14px;
     background: rgba(255, 255, 255, 0.62);
@@ -557,6 +558,7 @@
     font-style: italic;
     display: block;
     pointer-events: none;
+    text-transform: lowercase;
 }
 
 .adcheck-info-tooltip {
@@ -602,6 +604,64 @@
     visibility: visible;
 }
 
+.adcheck-info-btn > .adcheck-info-tooltip {
+    display: none;
+}
+
+.adcheck-info-tooltip-layer {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: max-content;
+    max-width: min(260px, calc(100vw - 24px));
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: var(--adcheck-ink);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 400;
+    font-style: normal;
+    line-height: 1.45;
+    letter-spacing: 0;
+    text-transform: none;
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(4px);
+    transition:
+        opacity 140ms ease,
+        visibility 140ms ease,
+        transform 140ms ease;
+    z-index: 2147483647;
+    white-space: normal;
+    text-align: left;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
+}
+
+.adcheck-info-tooltip-layer.is-visible {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
+
+.adcheck-info-tooltip-layer::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+}
+
+.adcheck-info-tooltip-layer[data-placement="top"]::after {
+    top: 100%;
+    border-top-color: var(--adcheck-ink);
+}
+
+.adcheck-info-tooltip-layer[data-placement="bottom"]::after {
+    bottom: 100%;
+    border-bottom-color: var(--adcheck-ink);
+}
+
 .adcheck-result-detail {
     margin-top: 3px;
     font-size: 11px;
@@ -617,9 +677,9 @@
 .adcheck-dom-jump {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 3px;
-    margin-top: 5px;
-    padding: 3px 9px;
+    padding: 5px 0px;
     border: none;
     border-radius: 999px;
     background: rgba(192, 57, 43, 0.08);
@@ -721,7 +781,7 @@
     background: rgba(160, 30, 40, 0.08);
     border: 1px solid rgba(160, 30, 40, 0.15);
     color: var(--adcheck-accent-deep);
-    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace !important;
     font-size: 10px;
     font-style: normal;
     user-select: text;
@@ -739,7 +799,7 @@
     flex-shrink: 0;
     padding: 1px 5px;
     border-radius: 999px;
-    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace !important;
     font-size: 9px;
     font-weight: 700;
     letter-spacing: 0.04em;
@@ -773,7 +833,7 @@
     background: rgba(18, 33, 45, 0.05);
     border: 1px solid rgba(18, 33, 45, 0.08);
     color: var(--adcheck-ink-soft);
-    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace !important;
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.02em;
@@ -815,7 +875,7 @@
     border: 1px solid rgba(18, 33, 45, 0.1);
     border-left: 3px solid rgba(192, 57, 43, 0.3);
     color: var(--adcheck-ink);
-    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace !important;
     font-size: 10px;
     line-height: 1.6;
     white-space: pre;
@@ -877,7 +937,7 @@
 .adcheck-popup-body {
     min-width: 450px;
     margin: 0;
-    font-family: var(--adcheck-font-body);
+    font-family: var(--adcheck-font-body) !important;
     color: var(--adcheck-ink);
     background:
         radial-gradient(ellipse at top left,
@@ -1392,7 +1452,7 @@
         12px/1.45 "SF Mono",
         "Fira Code",
         "Cascadia Code",
-        monospace;
+        monospace !important;
     resize: vertical;
 }
 
@@ -1414,7 +1474,7 @@
     background: rgba(18, 33, 45, 0.055);
     border: 1px solid rgba(18, 33, 45, 0.1);
     color: var(--adcheck-ink);
-    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace !important;
     font-size: 11px;
     font-style: normal;
     line-height: 1.55;

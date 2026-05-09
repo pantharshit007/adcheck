@@ -54,6 +54,10 @@
 		pickerMoveHandler: ((event: MouseEvent) => void) | null;
 		pickerClickHandler: ((event: MouseEvent) => void) | null;
 		pickerKeyHandler: ((event: KeyboardEvent) => void) | null;
+		infoTooltipEl: HTMLDivElement | null;
+		infoTooltipTarget: HTMLButtonElement | null;
+		infoTooltipRaf: number | null;
+		infoTooltipHideTimeout: number | null;
 	} = {
 		settings: AdCheckShared.cloneDefaultSettings(),
 		snapshot: createEmptySnapshot(),
@@ -71,6 +75,10 @@
 		pickerMoveHandler: null,
 		pickerClickHandler: null,
 		pickerKeyHandler: null,
+		infoTooltipEl: null,
+		infoTooltipTarget: null,
+		infoTooltipRaf: null,
+		infoTooltipHideTimeout: null,
 	};
 
 	if (!pageWindow.__ADCHECK_BOOTSTRAPPED__) {
@@ -539,7 +547,9 @@
 
 			if (entry.awaitBundle) {
 				const bundlePassed = state.snapshot.bundles.some(
-					(bundle) => bundle.label.toLowerCase() === entry.awaitBundle.toLowerCase() && bundle.status === "pass",
+					(bundle) =>
+						bundle.label.toLowerCase() === entry.awaitBundle.toLowerCase() &&
+						bundle.status === "pass",
 				);
 
 				if (!bundlePassed) {
@@ -587,7 +597,9 @@
 						status: hasTimedOut() ? "fail" : "pending",
 						explanation: HELP_COPY.windowGlobals,
 						detail: read?.error ?? "Could not read this window property.",
-						failureMessage: hasTimedOut() ? (read?.error ?? "Failed to read window property.") : undefined,
+						failureMessage: hasTimedOut()
+							? (read?.error ?? "Failed to read window property.")
+							: undefined,
 						path: entry.path,
 						rawValue: "",
 						valueType: "error",
@@ -605,7 +617,9 @@
 						detail: hasTimedOut()
 							? `Value is ${read.type}. The property may not exist or has not been set yet.`
 							: `Value is currently ${read.type}. Waiting to see if it gets set.`,
-						failureMessage: hasTimedOut() ? `Value is ${read.type} — property not found on window.` : undefined,
+						failureMessage: hasTimedOut()
+							? `Value is ${read.type} — property not found on window.`
+							: undefined,
 						path: entry.path,
 						rawValue: read.type,
 						valueType: read.type,
@@ -883,10 +897,12 @@
           </header>
           <div class="adcheck-group-list" id="adcheckResults"></div>
         </div>
+        <div class="adcheck-info-tooltip-layer" id="adcheckInfoTooltip" aria-hidden="true"></div>
       </div>
     `;
 		document.documentElement.appendChild(root);
 		state.root = root;
+		state.infoTooltipEl = ensureInfoTooltipLayer();
 		bindWidgetEvents();
 		renderWidget();
 	}
@@ -905,10 +921,18 @@
 		state.snapshot = createEmptySnapshot();
 		state.lastRenderSignature = "";
 		state.deadlineAt = null;
+		hideInfoTooltip();
+		window.removeEventListener("scroll", scheduleInfoTooltipReposition, true);
+		window.removeEventListener("resize", scheduleInfoTooltipReposition);
 
 		if (state.root) {
 			state.root.remove();
 			state.root = null;
+		}
+
+		if (state.infoTooltipEl) {
+			state.infoTooltipEl.remove();
+			state.infoTooltipEl = null;
 		}
 	}
 
@@ -982,6 +1006,7 @@
 		const badge = state.root.querySelector<HTMLElement>("#adcheckStatusBadge");
 		const toggleLabel = state.root.querySelector<HTMLElement>("#adcheckToggleTab span");
 
+		hideInfoTooltip();
 		widget?.classList.toggle("is-collapsed", state.settings.widgetCollapsed);
 		if (results) {
 			results.innerHTML = sections;
@@ -1117,12 +1142,11 @@
 					}
 				}
 
-				const detailText =
-					result.failureMessage
-						? `<p class="adcheck-result-detail is-failure">${escapeHtml(result.failureMessage)}</p>`
-						: result.status !== "pass"
-							? `<p class="adcheck-result-detail">${escapeHtml(result.detail)}</p>`
-							: "";
+				const detailText = result.failureMessage
+					? `<p class="adcheck-result-detail is-failure">${escapeHtml(result.failureMessage)}</p>`
+					: result.status !== "pass"
+						? `<p class="adcheck-result-detail">${escapeHtml(result.detail)}</p>`
+						: "";
 
 				return `
           <div class="adcheck-result-row is-${result.status}">
@@ -1187,6 +1211,13 @@
 			?.addEventListener("click", () => {
 				void persistWidgetSide(state.settings.widgetSide === "left" ? "right" : "left");
 			});
+
+		state.root.addEventListener("pointerover", handleInfoTooltipEvent);
+		state.root.addEventListener("pointerout", handleInfoTooltipEvent);
+		state.root.addEventListener("focusin", handleInfoTooltipEvent);
+		state.root.addEventListener("focusout", handleInfoTooltipEvent);
+		window.addEventListener("scroll", scheduleInfoTooltipReposition, true);
+		window.addEventListener("resize", scheduleInfoTooltipReposition);
 	}
 
 	function bindResultEvents(): void {
@@ -1208,6 +1239,154 @@
 				void navigateToDomId(row.dataset.domResult ?? "");
 			});
 		}
+	}
+
+	function handleInfoTooltipEvent(event: Event): void {
+		const target =
+			event.target instanceof Element
+				? event.target.closest<HTMLButtonElement>(".adcheck-info-btn")
+				: null;
+		if (!(target instanceof HTMLButtonElement)) {
+			if (event.type === "pointerout" || event.type === "focusout") {
+				hideInfoTooltip();
+			}
+			return;
+		}
+
+		if (event.type === "pointerout") {
+			const related = (event as PointerEvent).relatedTarget;
+			if (related instanceof Node && target.contains(related)) {
+				return;
+			}
+			hideInfoTooltip();
+			return;
+		}
+
+		if (event.type === "focusout") {
+			const related = (event as FocusEvent).relatedTarget;
+			if (related instanceof Node && target.contains(related)) {
+				return;
+			}
+			hideInfoTooltip();
+			return;
+		}
+
+		showInfoTooltip(target);
+	}
+
+	function showInfoTooltip(button: HTMLButtonElement): void {
+		const tooltipEl = state.infoTooltipEl;
+		if (!tooltipEl) {
+			return;
+		}
+
+		const content = button.querySelector<HTMLElement>(".adcheck-info-tooltip")?.textContent?.trim();
+		if (!content) {
+			return;
+		}
+
+		if (state.infoTooltipHideTimeout) {
+			window.clearTimeout(state.infoTooltipHideTimeout);
+			state.infoTooltipHideTimeout = null;
+		}
+
+		state.infoTooltipTarget = button;
+		tooltipEl.textContent = content;
+		tooltipEl.classList.add("is-visible");
+		tooltipEl.setAttribute("data-placement", "top");
+		scheduleInfoTooltipReposition();
+	}
+
+	function ensureInfoTooltipLayer(): HTMLDivElement | null {
+		const existing = document.getElementById("adcheckInfoTooltip");
+		if (existing instanceof HTMLDivElement) {
+			if (existing.parentElement !== document.documentElement) {
+				document.documentElement.appendChild(existing);
+			}
+			return existing;
+		}
+
+		const tooltipEl = document.createElement("div");
+		tooltipEl.id = "adcheckInfoTooltip";
+		tooltipEl.className = "adcheck-info-tooltip-layer";
+		tooltipEl.setAttribute("aria-hidden", "true");
+		document.documentElement.appendChild(tooltipEl);
+		return tooltipEl;
+	}
+
+	function scheduleInfoTooltipReposition(): void {
+		if (!state.infoTooltipEl || !state.infoTooltipTarget) {
+			return;
+		}
+
+		if (state.infoTooltipRaf !== null) {
+			window.cancelAnimationFrame(state.infoTooltipRaf);
+		}
+
+		state.infoTooltipRaf = window.requestAnimationFrame(() => {
+			state.infoTooltipRaf = null;
+			positionInfoTooltip();
+		});
+	}
+
+	function positionInfoTooltip(): void {
+		const tooltipEl = state.infoTooltipEl;
+		const target = state.infoTooltipTarget;
+		if (!tooltipEl || !target) {
+			return;
+		}
+
+		const targetRect = target.getBoundingClientRect();
+		const tooltipRect = tooltipEl.getBoundingClientRect();
+		const viewportWidth = window.innerWidth;
+		const viewportHeight = window.innerHeight;
+		const viewportMarginPx = 12;
+		const verticalGapPx = 10;
+		const centeredLeft = targetRect.left + targetRect.width / 2 - tooltipRect.width / 2;
+		const left = Math.max(
+			viewportMarginPx,
+			Math.min(centeredLeft, viewportWidth - viewportMarginPx - tooltipRect.width),
+		);
+
+		let top = targetRect.top - tooltipRect.height - verticalGapPx;
+		let placement: "top" | "bottom" = "top";
+		if (top < viewportMarginPx) {
+			top = targetRect.bottom + verticalGapPx;
+			placement = "bottom";
+		}
+		if (top + tooltipRect.height > viewportHeight - viewportMarginPx) {
+			top = Math.max(viewportMarginPx, viewportHeight - viewportMarginPx - tooltipRect.height);
+		}
+
+		tooltipEl.style.left = `${Math.round(left)}px`;
+		tooltipEl.style.top = `${Math.round(top)}px`;
+		tooltipEl.setAttribute("data-placement", placement);
+	}
+
+	function hideInfoTooltip(): void {
+		const tooltipEl = state.infoTooltipEl;
+		if (!tooltipEl) {
+			return;
+		}
+
+		state.infoTooltipTarget = null;
+		if (state.infoTooltipRaf !== null) {
+			window.cancelAnimationFrame(state.infoTooltipRaf);
+			state.infoTooltipRaf = null;
+		}
+
+		if (state.infoTooltipHideTimeout) {
+			window.clearTimeout(state.infoTooltipHideTimeout);
+		}
+
+		state.infoTooltipHideTimeout = window.setTimeout(() => {
+			tooltipEl.classList.remove("is-visible");
+			tooltipEl.removeAttribute("data-placement");
+			tooltipEl.style.left = "";
+			tooltipEl.style.top = "";
+			tooltipEl.textContent = "";
+			state.infoTooltipHideTimeout = null;
+		}, 80);
 	}
 
 	async function navigateToDomId(domId: string): Promise<void> {
@@ -1367,9 +1546,7 @@
 			...state.snapshot.windowGlobals,
 		];
 
-		return (
-			allResults.length
-		);
+		return allResults.length;
 	}
 
 	function hasPendingChecks(): boolean {
@@ -1406,7 +1583,9 @@
 
 		const hostname = window.location.hostname.toLowerCase();
 
-		return settings.ignoredDomains.some((entry) => AdCheckShared.matchesIgnoredDomain(entry, hostname));
+		return settings.ignoredDomains.some((entry) =>
+			AdCheckShared.matchesIgnoredDomain(entry, hostname),
+		);
 	}
 
 	async function loadSettings(): Promise<Settings> {
