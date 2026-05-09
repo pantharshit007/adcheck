@@ -1,8 +1,11 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { deflateSync } from "node:zlib";
+import { deflateSync, inflateSync } from "node:zlib";
 
+const sourceIconsDir = join(process.cwd(), "chrome-extension-icons");
 const iconsDir = join(process.cwd(), "icons");
+const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
 mkdirSync(iconsDir, { recursive: true });
 
 function createCrcTable() {
@@ -44,122 +47,132 @@ function chunk(type, data) {
   return Buffer.concat([lengthBuffer, typeBuffer, data, crcBuffer]);
 }
 
-function setPixel(buffer, size, x, y, r, g, b, a = 255) {
-  if (x < 0 || y < 0 || x >= size || y >= size) {
-    return;
+function paethPredictor(left, up, upLeft) {
+  const p = left + up - upLeft;
+  const leftDistance = Math.abs(p - left);
+  const upDistance = Math.abs(p - up);
+  const upLeftDistance = Math.abs(p - upLeft);
+
+  if (leftDistance <= upDistance && leftDistance <= upLeftDistance) {
+    return left;
   }
 
-  const rowStart = y * (size * 4 + 1);
-  const pixelStart = rowStart + 1 + x * 4;
-  buffer[pixelStart] = r;
-  buffer[pixelStart + 1] = g;
-  buffer[pixelStart + 2] = b;
-  buffer[pixelStart + 3] = a;
-}
-
-function fillRect(buffer, size, startX, startY, width, height, color) {
-  for (let y = startY; y < startY + height; y += 1) {
-    for (let x = startX; x < startX + width; x += 1) {
-      setPixel(buffer, size, x, y, color[0], color[1], color[2], color[3]);
-    }
+  if (upDistance <= upLeftDistance) {
+    return up;
   }
+
+  return upLeft;
 }
 
-function fillCircle(buffer, size, centerX, centerY, radius, color) {
-  for (let y = centerY - radius; y <= centerY + radius; y += 1) {
-    for (let x = centerX - radius; x <= centerX + radius; x += 1) {
-      const dx = x - centerX;
-      const dy = y - centerY;
-      if ((dx * dx) + (dy * dy) <= radius * radius) {
-        setPixel(buffer, size, x, y, color[0], color[1], color[2], color[3]);
-      }
-    }
+function decodePng(filePath) {
+  const buffer = readFileSync(filePath);
+  if (buffer.length < pngSignature.length || !buffer.subarray(0, pngSignature.length).equals(pngSignature)) {
+    throw new Error(`Unsupported PNG signature in ${filePath}`);
   }
-}
 
-function strokeLine(buffer, size, x0, y0, x1, y1, thickness, color) {
-  const deltaX = Math.abs(x1 - x0);
-  const stepX = x0 < x1 ? 1 : -1;
-  const deltaY = -Math.abs(y1 - y0);
-  const stepY = y0 < y1 ? 1 : -1;
-  let error = deltaX + deltaY;
-  let currentX = x0;
-  let currentY = y0;
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  let compression = 0;
+  let filter = 0;
+  let interlace = 0;
+  const idatParts = [];
 
-  while (true) {
-    fillCircle(buffer, size, currentX, currentY, thickness, color);
-    if (currentX === x1 && currentY === y1) {
+  let offset = pngSignature.length;
+  while (offset < buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    offset += 4;
+
+    const type = buffer.subarray(offset, offset + 4).toString("ascii");
+    offset += 4;
+
+    const data = buffer.subarray(offset, offset + length);
+    offset += length;
+
+    offset += 4;
+
+    if (type === "IHDR") {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      bitDepth = data[8];
+      colorType = data[9];
+      compression = data[10];
+      filter = data[11];
+      interlace = data[12];
+    } else if (type === "IDAT") {
+      idatParts.push(Buffer.from(data));
+    } else if (type === "IEND") {
       break;
     }
-    const doubled = error * 2;
-    if (doubled >= deltaY) {
-      error += deltaY;
-      currentX += stepX;
-    }
-    if (doubled <= deltaX) {
-      error += deltaX;
-      currentY += stepY;
+  }
+
+  if (width <= 0 || height <= 0) {
+    throw new Error(`Invalid PNG dimensions in ${filePath}`);
+  }
+
+  if (bitDepth !== 8 || colorType !== 6 || compression !== 0 || filter !== 0 || interlace !== 0) {
+    throw new Error(`Unsupported PNG format in ${filePath}`);
+  }
+
+  const inflated = inflateSync(Buffer.concat(idatParts));
+  const bytesPerPixel = 4;
+  const stride = width * bytesPerPixel;
+  const expectedLength = height * (stride + 1);
+
+  if (inflated.length !== expectedLength) {
+    throw new Error(`Unexpected PNG payload size in ${filePath}`);
+  }
+
+  const rgba = Buffer.alloc(width * height * bytesPerPixel);
+  let sourceOffset = 0;
+
+  for (let y = 0; y < height; y += 1) {
+    const filterType = inflated[sourceOffset];
+    sourceOffset += 1;
+
+    const rowStart = y * stride;
+    for (let x = 0; x < stride; x += 1) {
+      const raw = inflated[sourceOffset];
+      sourceOffset += 1;
+
+      const left = x >= bytesPerPixel ? rgba[rowStart + x - bytesPerPixel] : 0;
+      const up = y > 0 ? rgba[rowStart - stride + x] : 0;
+      const upLeft = y > 0 && x >= bytesPerPixel ? rgba[rowStart - stride + x - bytesPerPixel] : 0;
+
+      let recon = raw;
+      if (filterType === 1) {
+        recon = (raw + left) & 0xff;
+      } else if (filterType === 2) {
+        recon = (raw + up) & 0xff;
+      } else if (filterType === 3) {
+        recon = (raw + Math.floor((left + up) / 2)) & 0xff;
+      } else if (filterType === 4) {
+        recon = (raw + paethPredictor(left, up, upLeft)) & 0xff;
+      } else if (filterType !== 0) {
+        throw new Error(`Unsupported PNG filter type ${filterType} in ${filePath}`);
+      }
+
+      rgba[rowStart + x] = recon;
     }
   }
+
+  return { width, height, rgba };
 }
 
-function createIcon(size, palette) {
-  const raw = Buffer.alloc(size * (size * 4 + 1), 0);
+function encodePng(width, height, rgba) {
+  const raw = Buffer.alloc(height * (width * 4 + 1));
 
-  for (let y = 0; y < size; y += 1) {
-    raw[y * (size * 4 + 1)] = 0;
+  for (let y = 0; y < height; y += 1) {
+    const rowStart = y * (width * 4 + 1);
+    const pixelStart = y * width * 4;
+    raw[rowStart] = 0;
+    rgba.copy(raw, rowStart + 1, pixelStart, pixelStart + width * 4);
   }
-
-  const { backgroundA, backgroundB, accent, warm, deep } = palette;
-
-  for (let y = 0; y < size; y += 1) {
-    const blend = y / Math.max(size - 1, 1);
-    const color = [
-      Math.round(backgroundA[0] + ((backgroundB[0] - backgroundA[0]) * blend)),
-      Math.round(backgroundA[1] + ((backgroundB[1] - backgroundA[1]) * blend)),
-      Math.round(backgroundA[2] + ((backgroundB[2] - backgroundA[2]) * blend)),
-      255
-    ];
-    fillRect(raw, size, 0, y, size, 1, color);
-  }
-
-  fillCircle(raw, size, Math.round(size * 0.34), Math.round(size * 0.32), Math.round(size * 0.22), [255, 255, 255, 24]);
-  fillCircle(raw, size, Math.round(size * 0.44), Math.round(size * 0.43), Math.round(size * 0.26), warm);
-  fillCircle(raw, size, Math.round(size * 0.44), Math.round(size * 0.43), Math.round(size * 0.18), [255, 255, 255, 255]);
-  strokeLine(
-    raw,
-    size,
-    Math.round(size * 0.56),
-    Math.round(size * 0.56),
-    Math.round(size * 0.76),
-    Math.round(size * 0.76),
-    Math.max(1, Math.round(size * 0.05)),
-    deep
-  );
-  strokeLine(
-    raw,
-    size,
-    Math.round(size * 0.28),
-    Math.round(size * 0.43),
-    Math.round(size * 0.4),
-    Math.round(size * 0.54),
-    Math.max(1, Math.round(size * 0.035)),
-    accent
-  );
-  strokeLine(
-    raw,
-    size,
-    Math.round(size * 0.4),
-    Math.round(size * 0.54),
-    Math.round(size * 0.61),
-    Math.round(size * 0.3),
-    Math.max(1, Math.round(size * 0.035)),
-    accent
-  );
 
   const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(size, 0);
-  ihdr.writeUInt32BE(size, 4);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
   ihdr[8] = 8;
   ihdr[9] = 6;
   ihdr[10] = 0;
@@ -167,31 +180,51 @@ function createIcon(size, palette) {
   ihdr[12] = 0;
 
   return Buffer.concat([
-    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngSignature,
     chunk("IHDR", ihdr),
     chunk("IDAT", deflateSync(raw)),
     chunk("IEND", Buffer.alloc(0))
   ]);
 }
 
-const palettes = {
-  color: {
-    backgroundA: [11, 109, 114, 255],
-    backgroundB: [13, 143, 138, 255],
-    accent: [216, 95, 52, 255],
-    warm: [245, 239, 228, 255],
-    deep: [18, 33, 45, 255]
-  },
-  gray: {
-    backgroundA: [114, 119, 124, 255],
-    backgroundB: [154, 160, 166, 255],
-    accent: [189, 193, 198, 255],
-    warm: [242, 244, 247, 255],
-    deep: [86, 92, 98, 255]
-  }
-};
+function toGray(rgba) {
+  const gray = Buffer.from(rgba);
 
-for (const size of [16, 48, 128]) {
-  writeFileSync(join(iconsDir, `${size}.png`), createIcon(size, palettes.color));
-  writeFileSync(join(iconsDir, `${size}-gray.png`), createIcon(size, palettes.gray));
+  for (let index = 0; index < gray.length; index += 4) {
+    const value = Math.round((gray[index] * 0.299) + (gray[index + 1] * 0.587) + (gray[index + 2] * 0.114));
+    gray[index] = value;
+    gray[index + 1] = value;
+    gray[index + 2] = value;
+  }
+
+  return gray;
+}
+
+function getSourceIcons() {
+  return readdirSync(sourceIconsDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => entry.name)
+    .map((name) => name.match(/^(\d+)\.png$/))
+    .filter((match) => match !== null)
+    .map((match) => ({
+      size: Number.parseInt(match[1], 10),
+      fileName: `${match[1]}.png`
+    }))
+    .sort((left, right) => left.size - right.size);
+}
+
+for (const entry of readdirSync(iconsDir, { withFileTypes: true })) {
+  if (entry.isFile() && entry.name.endsWith(".png")) {
+    unlinkSync(join(iconsDir, entry.name));
+  }
+}
+
+for (const icon of getSourceIcons()) {
+  const sourcePath = join(sourceIconsDir, icon.fileName);
+  const colorTargetPath = join(iconsDir, icon.fileName);
+  const grayTargetPath = join(iconsDir, `${icon.size}-gray.png`);
+
+  copyFileSync(sourcePath, colorTargetPath);
+  const decoded = decodePng(sourcePath);
+  writeFileSync(grayTargetPath, encodePng(decoded.width, decoded.height, toGray(decoded.rgba)));
 }
