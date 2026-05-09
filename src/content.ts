@@ -1466,8 +1466,7 @@
 		}
 
 		state.deadlineHandle = window.setTimeout(() => {
-			state.snapshot = buildSnapshot();
-			renderWidget();
+			void runChecks(false);
 		}, AdCheckShared.DEFAULT_WAIT_MS + 50);
 	}
 
