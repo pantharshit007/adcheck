@@ -196,9 +196,7 @@
     frameId: number | undefined,
     scriptCodes: string[]
   ): Promise<void> {
-    const userScriptsApi = (chrome as typeof chrome & {
-      userScripts?: typeof chrome.userScripts;
-    }).userScripts;
+    const userScriptsApi = getUserScriptsApi();
 
     if (!userScriptsApi || typeof userScriptsApi.execute !== "function") {
       throw new Error(
@@ -219,92 +217,97 @@
     frameId: number | undefined,
     paths: string[]
   ): Promise<AdCheckShared.WindowGlobalReadResult[]> {
+    const userScriptsApi = getUserScriptsApi();
     const results: AdCheckShared.WindowGlobalReadResult[] = [];
 
     for (const rawPath of paths) {
       try {
-        const injectionResult = await (chrome.scripting.executeScript as unknown as (injection: Record<string, unknown>) => Promise<{ result?: unknown }[]>)({
+        const encodedPath = JSON.stringify(rawPath);
+        const injectionResult = await userScriptsApi.execute({
           target: typeof frameId === "number" ? { tabId, frameIds: [frameId] } : { tabId },
+          injectImmediately: true,
           world: "MAIN",
-          func: (dotPath: string) => {
-            const MAX_SERIALIZED_LENGTH = 4000;
+          js: [{
+            code: `(() => {
+              const MAX_SERIALIZED_LENGTH = 4000;
+              const dotPath = ${encodedPath};
 
-            function safeSerialize(val: unknown, depth: number, seen: WeakSet<object>, indent: number): string {
-              if (val === null) return "null";
-              if (val === undefined) return "undefined";
+              function safeSerialize(val, depth, seen, indent) {
+                if (val === null) return "null";
+                if (val === undefined) return "undefined";
 
-              const t = typeof val;
-              if (t === "string") return JSON.stringify(val);
-              if (t === "number" || t === "boolean") return String(val);
-              if (t === "bigint") return `${val}n`;
-              if (t === "symbol") return val.toString();
-              if (t === "function") return `[Function: ${(val as { name?: string }).name || "anonymous"}]`;
+                const t = typeof val;
+                if (t === "string") return JSON.stringify(val);
+                if (t === "number" || t === "boolean") return String(val);
+                if (t === "bigint") return String(val) + "n";
+                if (t === "symbol") return val.toString();
+                if (t === "function") return "[Function: " + ((val && val.name) || "anonymous") + "]";
 
-              if (val instanceof HTMLElement) {
-                const tag = val.tagName?.toLowerCase() ?? "element";
-                const id = val.id ? `#${val.id}` : "";
-                const cls = val.className && typeof val.className === "string"
-                  ? `.${val.className.split(" ").filter(Boolean).slice(0, 2).join(".")}`
-                  : "";
-                return `[${tag}${id}${cls}]`;
-              }
-
-              if (val instanceof Node) {
-                return `[Node: ${val.nodeName}]`;
-              }
-
-              if (depth > 3) return Array.isArray(val) ? "[Array]" : "[Object]";
-
-              if (seen.has(val as object)) return "[Circular]";
-              seen.add(val as object);
-
-              const pad = "  ".repeat(indent + 1);
-              const closePad = "  ".repeat(indent);
-
-              try {
-                if (Array.isArray(val)) {
-                  if (val.length === 0) return "[]";
-                  const items = val.slice(0, 20).map((item) => `${pad}${safeSerialize(item, depth + 1, seen, indent + 1)}`);
-                  const suffix = val.length > 20 ? `\n${pad}// ...${val.length - 20} more items` : "";
-                  return `[\n${items.join(",\n")}${suffix}\n${closePad}]`;
+                if (typeof HTMLElement !== "undefined" && val instanceof HTMLElement) {
+                  const tag = val.tagName ? val.tagName.toLowerCase() : "element";
+                  const id = val.id ? "#" + val.id : "";
+                  const cls = val.className && typeof val.className === "string"
+                    ? "." + val.className.split(" ").filter(Boolean).slice(0, 2).join(".")
+                    : "";
+                  return "[" + tag + id + cls + "]";
                 }
 
-                const obj = val as Record<string, unknown>;
-                const allKeys = Object.keys(obj);
-                if (allKeys.length === 0) return "{}";
-                const keys = allKeys.slice(0, 30);
-                const pairs = keys.map((k) => `${pad}${JSON.stringify(k)}: ${safeSerialize(obj[k], depth + 1, seen, indent + 1)}`);
-                const suffix = allKeys.length > 30 ? `\n${pad}// ...${allKeys.length - 30} more keys` : "";
-                return `{\n${pairs.join(",\n")}${suffix}\n${closePad}}`;
-              } catch {
-                return "[Unserializable]";
+                if (typeof Node !== "undefined" && val instanceof Node) {
+                  return "[Node: " + val.nodeName + "]";
+                }
+
+                if (depth > 3) return Array.isArray(val) ? "[Array]" : "[Object]";
+
+                if (seen.has(val)) return "[Circular]";
+                seen.add(val);
+
+                const pad = "  ".repeat(indent + 1);
+                const closePad = "  ".repeat(indent);
+
+                try {
+                  if (Array.isArray(val)) {
+                    if (val.length === 0) return "[]";
+                    const items = val.slice(0, 20).map((item) => pad + safeSerialize(item, depth + 1, seen, indent + 1));
+                    const suffix = val.length > 20 ? "\\n" + pad + "// ..." + (val.length - 20) + " more items" : "";
+                    return "[\\n" + items.join(",\\n") + suffix + "\\n" + closePad + "]";
+                  }
+
+                  const obj = val;
+                  const allKeys = Object.keys(obj);
+                  if (allKeys.length === 0) return "{}";
+                  const keys = allKeys.slice(0, 30);
+                  const pairs = keys.map((k) => pad + JSON.stringify(k) + ": " + safeSerialize(obj[k], depth + 1, seen, indent + 1));
+                  const suffix = allKeys.length > 30 ? "\\n" + pad + "// ..." + (allKeys.length - 30) + " more keys" : "";
+                  return "{\\n" + pairs.join(",\\n") + suffix + "\\n" + closePad + "}";
+                } catch {
+                  return "[Unserializable]";
+                }
               }
-            }
 
-            try {
-              const keys = dotPath.replace(/^window\./, "").split(".");
-              let current: unknown = window;
-              for (const key of keys) {
-                if (current === null || current === undefined) break;
-                current = (current as Record<string, unknown>)[key];
+              try {
+                const keys = String(dotPath).replace(/^window\\./, "").split(".");
+                let current = window;
+                for (const key of keys) {
+                  if (current === null || current === undefined) break;
+                  current = current[key];
+                }
+
+                const t = current === null ? "null"
+                  : current === undefined ? "undefined"
+                  : Array.isArray(current) ? "array"
+                  : typeof current;
+
+                const serialized = safeSerialize(current, 0, new WeakSet(), 0);
+                const value = serialized.length > MAX_SERIALIZED_LENGTH
+                  ? serialized.slice(0, MAX_SERIALIZED_LENGTH) + "…[truncated]"
+                  : serialized;
+
+                return { path: dotPath, type: t, value, error: undefined };
+              } catch (e) {
+                return { path: dotPath, type: "error", value: "", error: String(e) };
               }
-
-              const t = current === null ? "null"
-                : current === undefined ? "undefined"
-                : Array.isArray(current) ? "array"
-                : typeof current;
-
-              const serialized = safeSerialize(current, 0, new WeakSet(), 0);
-              const value = serialized.length > MAX_SERIALIZED_LENGTH
-                ? serialized.slice(0, MAX_SERIALIZED_LENGTH) + "…[truncated]"
-                : serialized;
-
-              return { path: dotPath, type: t, value, error: undefined };
-            } catch (e) {
-              return { path: dotPath, type: "error", value: "", error: String(e) };
-            }
-          },
-          args: [rawPath]
+            })()`,
+          }],
         });
 
         const frameResult = injectionResult?.[0]?.result as AdCheckShared.WindowGlobalReadResult | undefined;
@@ -324,6 +327,20 @@
     }
 
     return results;
+  }
+
+  function getUserScriptsApi(): typeof chrome.userScripts {
+    const userScriptsApi = (chrome as typeof chrome & {
+      userScripts?: typeof chrome.userScripts;
+    }).userScripts;
+
+    if (!userScriptsApi || typeof userScriptsApi.execute !== "function") {
+      throw new Error(
+        "Inline override script blocks could not run. Markup and direct external script tags may still apply. Enable Allow User Scripts for AdCheck to run inline loader code."
+      );
+    }
+
+    return userScriptsApi;
   }
 
   async function getUserScriptStatus(): Promise<AdCheckShared.UserScriptStatus> {
