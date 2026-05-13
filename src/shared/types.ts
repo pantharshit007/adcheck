@@ -42,6 +42,13 @@ declare namespace AdCheckShared {
     localStorageKeys: string[];
     ignoredDomains: string[];
     windowGlobals: WindowGlobalEntry[];
+    blockedRoutesEnabled: boolean;
+    blockedRoutes: BlockedRouteEntry[];
+  }
+
+  interface BlockedRouteEntry {
+    value: string;
+    enabled: boolean;
   }
 
   interface NetworkHistoryEntry {
@@ -140,7 +147,8 @@ declare namespace AdCheckShared {
       | "START_SITE_PICKER"
       | "CANCEL_SITE_PICKER"
       | "EXECUTE_SITE_OVERRIDE_INLINE_SCRIPTS"
-      | "READ_WINDOW_GLOBALS";
+      | "READ_WINDOW_GLOBALS"
+      | "SYNC_BLOCKED_ROUTE_RULES";
     allPass?: boolean;
     scriptCodes?: string[];
     windowGlobalPaths?: string[];

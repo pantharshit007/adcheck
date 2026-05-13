@@ -20,3 +20,4 @@ _ignore this for now_
 - [ ] clean up the popup settings section HTML string rendering by moving the section markup out of the TS file or integrating it into a more maintainable template system.
 - [x] fixed the styling in the side-panel, it looks kind of ugly and un-polished, we can improve that.
 - [ ] can introduced multi dependency on the window object, instead of only one.
+- [ ] add a new section for ad Requests block, (such as banner request ex: ads?pv)

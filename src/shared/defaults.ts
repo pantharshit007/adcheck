@@ -8,19 +8,21 @@ namespace AdCheckShared {
 	export const MAX_NETWORK_HISTORY = 200;
 	export const DEFAULT_WAIT_MS = 5000;
 
-	export const DEFAULT_SETTINGS: Settings = {
-		enabled: false,
-		widgetCollapsed: false,
-		widgetSide: "right",
-		bundles: ["script.js"],
+		export const DEFAULT_SETTINGS: Settings = {
+			enabled: false,
+			widgetCollapsed: false,
+			widgetSide: "right",
+			bundles: ["script.js"],
 		classNames: [],
 		domIds: [],
 		attributes: [],
-		cookies: [],
-		localStorageKeys: [],
-		ignoredDomains: [],
-		windowGlobals: [],
-	};
+			cookies: [],
+			localStorageKeys: [],
+			ignoredDomains: [],
+			windowGlobals: [],
+			blockedRoutesEnabled: true,
+			blockedRoutes: [],
+		};
 
 	export const SETTINGS_SECTIONS = [
 		{
@@ -81,6 +83,8 @@ namespace AdCheckShared {
 			localStorageKeys: [...DEFAULT_SETTINGS.localStorageKeys],
 			ignoredDomains: [...DEFAULT_SETTINGS.ignoredDomains],
 			windowGlobals: DEFAULT_SETTINGS.windowGlobals.map((entry) => ({ ...entry })),
+			blockedRoutesEnabled: DEFAULT_SETTINGS.blockedRoutesEnabled,
+			blockedRoutes: DEFAULT_SETTINGS.blockedRoutes.map((entry) => ({ ...entry })),
 		};
 	}
 
@@ -107,6 +111,14 @@ namespace AdCheckShared {
 			windowGlobals: normalizeWindowGlobals(
 				(candidate as Record<string, unknown>).windowGlobals,
 				defaults.windowGlobals,
+			),
+			blockedRoutesEnabled:
+				typeof candidate.blockedRoutesEnabled === "boolean"
+					? candidate.blockedRoutesEnabled
+					: defaults.blockedRoutesEnabled,
+			blockedRoutes: normalizeBlockedRoutes(
+				(candidate as Record<string, unknown>).blockedRoutes,
+				defaults.blockedRoutes,
 			),
 		};
 	}
@@ -296,6 +308,47 @@ namespace AdCheckShared {
 			entries.push({
 				path,
 				awaitBundle: typeof candidate.awaitBundle === "string" ? candidate.awaitBundle.trim() : "",
+			});
+		}
+
+		return entries;
+	}
+
+	export function normalizeBlockedRoutes(
+		value: unknown,
+		fallback: BlockedRouteEntry[] = [],
+	): BlockedRouteEntry[] {
+		if (!Array.isArray(value)) {
+			return fallback.map((entry) => ({ ...entry }));
+		}
+
+		const entries: BlockedRouteEntry[] = [];
+		const seen = new Set<string>();
+		for (const item of value) {
+			if (typeof item === "string") {
+				const normalized = item.trim();
+				if (!normalized || seen.has(normalized)) {
+					continue;
+				}
+				seen.add(normalized);
+				entries.push({ value: normalized, enabled: true });
+				continue;
+			}
+
+			if (!item || typeof item !== "object") {
+				continue;
+			}
+
+			const candidate = item as Partial<BlockedRouteEntry>;
+			const valueText = typeof candidate.value === "string" ? candidate.value.trim() : "";
+			if (!valueText || seen.has(valueText)) {
+				continue;
+			}
+
+			seen.add(valueText);
+			entries.push({
+				value: valueText,
+				enabled: typeof candidate.enabled === "boolean" ? candidate.enabled : true,
 			});
 		}
 

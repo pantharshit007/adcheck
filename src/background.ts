@@ -3,8 +3,9 @@
 (() => {
   self.importScripts("shared/defaults.js");
 
-  type Settings = AdCheckShared.Settings;
-  type NetworkTabState = AdCheckShared.NetworkTabState;
+	type Settings = AdCheckShared.Settings;
+	type BlockedRouteEntry = AdCheckShared.BlockedRouteEntry;
+	type NetworkTabState = AdCheckShared.NetworkTabState;
   type NetworkHistoryEntry = AdCheckShared.NetworkHistoryEntry;
   type ActiveNetworkRequest = AdCheckShared.ActiveNetworkRequest;
   type RuntimeMessage = AdCheckShared.RuntimeMessage;
@@ -34,12 +35,13 @@
     }
   } as const;
 
-  const settingsCache: { current: Settings } = {
-    current: AdCheckShared.cloneDefaultSettings()
-  };
+	const settingsCache: { current: Settings } = {
+		current: AdCheckShared.cloneDefaultSettings()
+	};
 
-  const tabStateCache = new Map<number, NetworkTabState>();
-  const pendingRequests = new Map<string, PendingRequest>();
+	const tabStateCache = new Map<number, NetworkTabState>();
+	const pendingRequests = new Map<string, PendingRequest>();
+	const BLOCKED_ROUTE_RULE_ID_BASE = 100000;
 
   void initialize();
 
@@ -52,12 +54,13 @@
       return;
     }
 
-    const nextValue = changes[AdCheckShared.STORAGE_KEY]?.newValue as Partial<Settings> | undefined;
-    if (nextValue) {
-      settingsCache.current = AdCheckShared.mergeSettings(nextValue);
-      void syncActionIcons();
-    }
-  });
+		const nextValue = changes[AdCheckShared.STORAGE_KEY]?.newValue as Partial<Settings> | undefined;
+		if (nextValue) {
+			settingsCache.current = AdCheckShared.mergeSettings(nextValue);
+			void syncBlockedRouteRules();
+			void syncActionIcons();
+		}
+	});
 
   chrome.tabs.onActivated.addListener(() => {
     void syncActionIcons();
@@ -107,10 +110,11 @@
     return true;
   });
 
-  async function initialize(): Promise<void> {
-    settingsCache.current = await ensureSettings();
-    await syncActionIcons();
-  }
+	async function initialize(): Promise<void> {
+		settingsCache.current = await ensureSettings();
+		await syncBlockedRouteRules();
+		await syncActionIcons();
+	}
 
   async function ensureSettings(): Promise<Settings> {
     const result = await chrome.storage.sync.get(AdCheckShared.STORAGE_KEY);
@@ -122,10 +126,11 @@
       });
     }
 
-    settingsCache.current = merged;
-    await syncActionIcons();
-    return merged;
-  }
+		settingsCache.current = merged;
+		await syncBlockedRouteRules();
+		await syncActionIcons();
+		return merged;
+	}
 
   async function handleRuntimeMessage(message: RuntimeMessage, sender: chrome.runtime.MessageSender): Promise<unknown> {
     switch (message.type) {
@@ -165,10 +170,13 @@
         await updateActionBadge(tabId, message.allPass === true);
         return { ok: true };
       }
-      case "SYNC_ACTION_STATE":
-        await syncActionIcons();
-        return { ok: true };
-      case "EXECUTE_SITE_OVERRIDE_INLINE_SCRIPTS": {
+		case "SYNC_ACTION_STATE":
+			await syncActionIcons();
+			return { ok: true };
+		case "SYNC_BLOCKED_ROUTE_RULES":
+			await syncBlockedRouteRules();
+			return { ok: true };
+		case "EXECUTE_SITE_OVERRIDE_INLINE_SCRIPTS": {
         const tabId = sender.tab?.id;
         if (typeof tabId !== "number" || !Array.isArray(message.scriptCodes) || message.scriptCodes.length === 0) {
           return { ok: false, error: "Missing tab or inline script payload." };
@@ -210,6 +218,72 @@
       js: scriptCodes.map((code) => ({ code })),
       world: "USER_SCRIPT"
     });
+  }
+
+  async function syncBlockedRouteRules(): Promise<void> {
+    if (!chrome.declarativeNetRequest) {
+      return;
+    }
+
+    const blockedRoutes = settingsCache.current.blockedRoutesEnabled ? settingsCache.current.blockedRoutes : [];
+    const existingRules = await chrome.declarativeNetRequest.getDynamicRules();
+    const removeRuleIds = existingRules
+      .filter((rule) => rule.id >= BLOCKED_ROUTE_RULE_ID_BASE && rule.id < BLOCKED_ROUTE_RULE_ID_BASE + 1000)
+      .map((rule) => rule.id);
+		const addRules = blockedRoutes.flatMap((entry, index) => {
+			const rule = buildBlockedRouteRule(entry, BLOCKED_ROUTE_RULE_ID_BASE + index);
+			return rule ? [rule] : [];
+		});
+
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds,
+      addRules
+    });
+  }
+
+  function buildBlockedRouteRule(entry: BlockedRouteEntry, id: number): chrome.declarativeNetRequest.Rule | null {
+    const value = entry.value.trim();
+    if (!value || !entry.enabled) {
+      return null;
+    }
+
+    const regexFilter = isBlockedRouteRegex(value) ? buildBlockedRouteRegex(value) : null;
+    return {
+      id,
+      action: { type: "block" },
+      condition: regexFilter
+        ? {
+            regexFilter,
+            isUrlFilterCaseSensitive: false,
+          }
+        : {
+            urlFilter: value,
+            isUrlFilterCaseSensitive: false,
+          }
+    };
+  }
+
+  function isBlockedRouteRegex(value: string): boolean {
+    const trimmed = value.trim();
+    return (trimmed.startsWith("/") && trimmed.lastIndexOf("/") > 0) || AdCheckShared.looksLikeRegexPattern(trimmed);
+  }
+
+  function buildBlockedRouteRegex(value: string): string | null {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const source = trimmed.startsWith("/") && trimmed.lastIndexOf("/") > 0
+      ? trimmed.slice(1, trimmed.lastIndexOf("/"))
+      : trimmed;
+
+    try {
+      new RegExp(source);
+      return source;
+    } catch {
+      return null;
+    }
   }
 
   async function readWindowGlobals(

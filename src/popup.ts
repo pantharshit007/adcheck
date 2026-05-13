@@ -3,6 +3,7 @@
 (() => {
 	type Settings = AdCheckShared.Settings;
 	type SettingsSection = (typeof AdCheckShared.SETTINGS_SECTIONS)[number];
+	type BlockedRouteEntry = AdCheckShared.BlockedRouteEntry;
 	type SiteOverrideRule = AdCheckShared.SiteOverrideRule;
 	type SitePickerSelection = AdCheckShared.SitePickerSelection;
 	type UserScriptStatus = AdCheckShared.UserScriptStatus;
@@ -109,16 +110,16 @@
 			!closeImportEditorButton ||
 			!siteOverrideSiteLabel ||
 			!siteOverrideSelectionLabel ||
-			!siteOverridePermissionMessage ||
-			!siteOverrideEditor ||
-			!toggleSiteOverrideEditorButton ||
-			!pickSiteElementButton ||
-			!clearSiteSelectionButton ||
-			!siteOverrideEnabledInput ||
-			!siteOverridePlacementSelect ||
-			!siteOverrideSnippetInput ||
-			!saveSiteOverrideButton ||
-			!deleteSiteOverrideButton
+		!siteOverridePermissionMessage ||
+		!siteOverrideEditor ||
+		!toggleSiteOverrideEditorButton ||
+		!pickSiteElementButton ||
+		!clearSiteSelectionButton ||
+		!siteOverrideEnabledInput ||
+		!siteOverridePlacementSelect ||
+		!siteOverrideSnippetInput ||
+		!saveSiteOverrideButton ||
+		!deleteSiteOverrideButton
 		) {
 			return;
 		}
@@ -551,13 +552,20 @@
 		const insertIndex = allSections.findIndex((s) => s.key === INSERT_AFTER_KEY);
 		const before = allSections.slice(0, insertIndex + 1);
 		const after = allSections.slice(insertIndex + 1);
+		const localStorageIndex = after.findIndex((s) => s.key === "localStorageKeys");
+		const beforeBlockedRoutes = after.slice(0, localStorageIndex + 1);
+		const afterBlockedRoutes = after.slice(localStorageIndex + 1);
 		const windowGlobalsSection = renderWindowGlobalsSection(settings);
+		const blockedRoutesSection = renderBlockedRoutesSection(settings);
 		formRoot.innerHTML =
 			before.map((s) => renderSection(s, settings)).join("") +
 			windowGlobalsSection +
-			after.map((s) => renderSection(s, settings)).join("");
+			beforeBlockedRoutes.map((s) => renderSection(s, settings)).join("") +
+			blockedRoutesSection +
+			afterBlockedRoutes.map((s) => renderSection(s, settings)).join("");
 
 		bindSectionActions();
+		bindBlockedRouteActions();
 		bindWindowGlobalsActions();
 		renderIgnoreSiteControl(settings);
 	}
@@ -938,6 +946,8 @@
 		}
 
 		base.windowGlobals = collectWindowGlobalsFromForm();
+		base.blockedRoutes = collectBlockedRoutesFromForm();
+		base.blockedRoutesEnabled = collectBlockedRoutesEnabled();
 
 		return base;
 	}
@@ -1099,6 +1109,157 @@
         </div>
       </section>
     `;
+	}
+
+	function renderBlockedRoutesSection(settings: Settings): string {
+		const entries = settings.blockedRoutes;
+		const enabledCount = entries.filter((entry) => entry.enabled && entry.value.trim().length > 0).length;
+		const itemCount = entries.filter((entry) => entry.value.trim().length > 0).length;
+		const countBadge = itemCount > 0 ? `<span class="adcheck-section-count">${enabledCount}/${itemCount}</span>` : "";
+
+		return `
+		  <section class="adcheck-config-section" data-section="blockedRoutes" id="blockedRoutesSection">
+		    <div class="adcheck-config-section-header adcheck-section-accordion-header" data-accordion-toggle="blockedRoutes" role="button" tabindex="0" aria-expanded="false">
+		      <div class="adcheck-section-header-left">
+		        <div class="adcheck-section-title-row">
+		          <p class="adcheck-section-title">Blocked routes</p>
+		          ${countBadge}
+		        </div>
+		        <p class="adcheck-section-copy">Add endpoint names or regex patterns to cancel matching network requests. Toggle each rule individually or disable them all at once.</p>
+		      </div>
+		      <div class="adcheck-section-header-right">
+		        <button class="adcheck-add-button" type="button" data-blocked-route-add>Add</button>
+		        <span class="adcheck-section-chevron" aria-hidden="true">›</span>
+		      </div>
+		    </div>
+		    <div class="adcheck-entry-list is-hidden" data-entry-list="blockedRoutes">
+		      <div class="adcheck-blocked-routes-panel">
+		        <div class="adcheck-blocked-routes-master">
+		          <div>
+		            <p class="adcheck-inline-field-label">Enable route blocking</p>
+		            <p class="adcheck-field-help">Disabled rules stay saved but do not block requests.</p>
+		          </div>
+		          <label class="adcheck-toggle adcheck-override-toggle" aria-label="Enable route blocking">
+		            <input id="blockedRoutesToggle" type="checkbox" ${settings.blockedRoutesEnabled ? "checked" : ""} />
+		            <span class="adcheck-toggle-track">
+		              <span class="adcheck-toggle-thumb"></span>
+		            </span>
+		          </label>
+		        </div>
+		        <div class="adcheck-blocked-routes-list" id="blockedRoutesList">${renderBlockedRoutesRows(entries)}</div>
+		      </div>
+		    </div>
+		  </section>
+		`;
+	}
+
+	function renderBlockedRoutesRows(entries: BlockedRouteEntry[]): string {
+		const rows = entries.length > 0 ? entries : [{ value: "", enabled: true }];
+		return rows.map((entry, index) => renderBlockedRouteRow(entry, index)).join("");
+	}
+
+	function renderBlockedRouteRow(entry: BlockedRouteEntry, index: number): string {
+		return `
+		  <div class="adcheck-blocked-route-row" data-blocked-route-row="${index}">
+		    <label class="adcheck-blocked-route-checkbox" aria-label="Enable blocked route">
+		      <input type="checkbox" data-blocked-route-enabled ${entry.enabled ? "checked" : ""} />
+		    </label>
+		    <input class="adcheck-entry-input adcheck-blocked-route-input" type="text" value="${escapeHtml(entry.value)}" placeholder="e.g. /ads\/|tracking" data-blocked-route-value />
+		    <button class="adcheck-row-remove" type="button" data-blocked-route-remove aria-label="Remove blocked route">×</button>
+		  </div>
+		`;
+	}
+
+	function bindBlockedRouteActions(): void {
+		const blockedRoutesList = getBlockedRoutesList();
+		if (!blockedRoutesList) {
+			return;
+		}
+
+		const addButton = formRoot?.querySelector<HTMLButtonElement>("[data-blocked-route-add]");
+		if (addButton) {
+			addButton.addEventListener("click", (event) => {
+				event.stopPropagation();
+				expandSection("blockedRoutes");
+				addBlockedRouteRow();
+			});
+		}
+
+		for (const input of Array.from(blockedRoutesList.querySelectorAll<HTMLInputElement>("[data-blocked-route-enabled]"))) {
+			input.addEventListener("change", () => {
+				persistBlockedRoutesState();
+			});
+		}
+
+		for (const input of Array.from(blockedRoutesList.querySelectorAll<HTMLInputElement>("[data-blocked-route-value]"))) {
+			input.addEventListener("input", () => {
+				persistBlockedRoutesState();
+			});
+		}
+
+		for (const button of Array.from(blockedRoutesList.querySelectorAll<HTMLButtonElement>("[data-blocked-route-remove]"))) {
+			button.addEventListener("click", () => {
+				button.closest(".adcheck-blocked-route-row")?.remove();
+				persistBlockedRoutesState();
+			});
+		}
+	}
+
+	function addBlockedRouteRow(): void {
+		const blockedRoutesList = getBlockedRoutesList();
+		if (!blockedRoutesList) {
+			return;
+		}
+
+		const wrapper = document.createElement("div");
+		wrapper.innerHTML = renderBlockedRouteRow({ value: "", enabled: true }, blockedRoutesList.children.length);
+		const row = wrapper.firstElementChild as HTMLDivElement | null;
+		if (!row) {
+			return;
+		}
+
+		blockedRoutesList.appendChild(row);
+		bindBlockedRouteActions();
+		row.querySelector<HTMLInputElement>("[data-blocked-route-value]")?.focus();
+	}
+
+	function persistBlockedRoutesState(): void {
+		const settings = collectSettingsFromForm();
+		popupState.currentSettings = settings;
+	}
+
+	function collectBlockedRoutesFromForm(): BlockedRouteEntry[] {
+		const blockedRoutesList = getBlockedRoutesList();
+		if (!blockedRoutesList) {
+			return [];
+		}
+
+		const entries: BlockedRouteEntry[] = [];
+		for (const row of Array.from(blockedRoutesList.querySelectorAll<HTMLElement>(".adcheck-blocked-route-row"))) {
+			const value = row.querySelector<HTMLInputElement>("[data-blocked-route-value]")?.value.trim() ?? "";
+			if (!value) {
+				continue;
+			}
+
+			entries.push({
+				value,
+				enabled: row.querySelector<HTMLInputElement>("[data-blocked-route-enabled]")?.checked ?? true,
+			});
+		}
+
+		return AdCheckShared.normalizeBlockedRoutes(entries, []);
+	}
+
+	function collectBlockedRoutesEnabled(): boolean {
+		return getBlockedRoutesSection()?.querySelector<HTMLInputElement>("#blockedRoutesToggle")?.checked ?? true;
+	}
+
+	function getBlockedRoutesSection(): HTMLDivElement | null {
+		return formRoot?.querySelector<HTMLDivElement>("#blockedRoutesSection") ?? null;
+	}
+
+	function getBlockedRoutesList(): HTMLDivElement | null {
+		return getBlockedRoutesSection()?.querySelector<HTMLDivElement>("#blockedRoutesList") ?? null;
 	}
 
 	function bindWindowGlobalsActions(): void {
