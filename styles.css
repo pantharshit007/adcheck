@@ -102,6 +102,29 @@
     pointer-events: auto;
 }
 
+.adcheck-dev-ribbon {
+    position: absolute;
+    top: 18px;
+    left: -44px;
+    z-index: 4;
+    padding: 3px 40px;
+    background: linear-gradient(90deg, #96231a, #c0392b);
+    box-shadow: 0 8px 18px rgba(80, 10, 10, 0.22);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    transform: rotate(-45deg);
+    transform-origin: center;
+    pointer-events: none;
+    user-select: none;
+}
+
+.adcheck-dev-ribbon.is-hidden {
+    display: none;
+}
+
 .adcheck-widget.is-collapsed {
     transform: translateX(calc(100% + 20px));
     box-shadow: none;
@@ -604,7 +627,7 @@
     visibility: visible;
 }
 
-.adcheck-info-btn > .adcheck-info-tooltip {
+.adcheck-info-btn>.adcheck-info-tooltip {
     display: none;
 }
 
@@ -950,6 +973,7 @@
 }
 
 .adcheck-popup-app {
+    position: relative;
     padding: 10px;
 }
 
@@ -966,6 +990,11 @@
         0 20px 48px rgba(80, 10, 10, 0.15),
         inset 0 1px 0 rgba(255, 255, 255, 0.9);
     padding: 0;
+}
+
+.adcheck-popup-app>.adcheck-dev-ribbon {
+    top: 32px;
+    left: -42px;
 }
 
 .adcheck-popup-hero {

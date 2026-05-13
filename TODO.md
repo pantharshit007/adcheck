@@ -18,6 +18,10 @@ _ignore this for now_
 - [ ] we can set individual refresh count for each of checks: bundles [10], page element [5], class name [4], cookie [4], attribute [3], localstorage [5], now if anyone of the checks here are still failing we will refresh internally that many times in a constant period to ensure we won't miss just because the action was delayed. For ex: some time the network call is delayed but by that time our first time refresh check is already complete and user had to manually refresh it to check again.
 - [ ] add a check that it should not only check for network if the call is made, also check the status returned what if the call failed/blocked.
 - [ ] clean up the popup settings section HTML string rendering by moving the section markup out of the TS file or integrating it into a more maintainable template system.
-- [x] fixed the styling in the side-panel, it looks kind of ugly and un-polished, we can improve that.
 - [ ] can introduced multi dependency on the window object, instead of only one.
-- [ ] add a new section for ad Requests block, (such as banner request ex: ads?pv)
+- [x] re-check the logic for showing an alert when allow user scripts setting is disabled, since currently it doesn't show it when my allow user scripts is disabled for the current site override setting.
+- [x] Is there any way to add like a diagnal banner or something to tell the developer that this is a development build and not a production build?
+
+---
+
+- [ ] get an understanding of how the network blocking works.

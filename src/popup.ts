@@ -1,4 +1,5 @@
 /// <reference path="./shared/types.ts" />
+/// <reference path="./shared/build-info.ts" />
 
 (() => {
 	type Settings = AdCheckShared.Settings;
@@ -49,6 +50,7 @@
 	const siteOverridePermissionMessage = document.getElementById(
 		"siteOverridePermissionMessage",
 	) as HTMLParagraphElement | null;
+	const devBuildRibbon = document.getElementById("devBuildRibbon") as HTMLDivElement | null;
 	const siteOverrideEditor = document.getElementById("siteOverrideEditor") as HTMLDivElement | null;
 	const toggleSiteOverrideEditorButton = document.getElementById(
 		"toggleSiteOverrideEditorButton",
@@ -130,6 +132,7 @@
 		populateImportExportInput(settings);
 		setImportEditorVisible(false);
 		setSiteOverrideEditorVisible(false);
+		updateDevBuildRibbon();
 		await initializeSiteOverridePanel();
 		renderIgnoreSiteControl(settings);
 
@@ -197,6 +200,10 @@
 			void refreshUserScriptWarning(siteOverrideSnippetInput.value);
 		});
 
+		siteOverrideEnabledInput.addEventListener("change", () => {
+			void refreshUserScriptWarning(siteOverrideSnippetInput.value);
+		});
+
 		toggleSiteOverrideEditorButton.addEventListener("click", () => {
 			setSiteOverrideEditorVisible(!isSiteOverrideEditorVisible());
 		});
@@ -215,6 +222,19 @@
 		popupState.pickedSelection = await loadSiteSelection(popupState.activeSite.hostname);
 		const override = await loadSiteOverride(popupState.activeSite.hostname);
 		hydrateSiteOverridePanel(override, popupState.pickedSelection);
+	}
+
+	function updateDevBuildRibbon(): void {
+		if (!devBuildRibbon) {
+			return;
+		}
+
+		if (AdCheckShared.IS_DEV_BUILD) {
+			devBuildRibbon.classList.remove("is-hidden");
+			return;
+		}
+
+		devBuildRibbon.remove();
 	}
 
 	function renderSiteOverrideUnavailable(): void {
@@ -485,6 +505,20 @@
 
 	async function detectUserScriptStatus(): Promise<UserScriptStatus> {
 		const chromeMajorVersion = parseChromeMajorVersion();
+
+		try {
+			const response = (await chrome.runtime.sendMessage({
+				type: "GET_USER_SCRIPT_STATUS",
+			} satisfies AdCheckShared.RuntimeMessage)) as
+				| { ok: boolean; status?: UserScriptStatus }
+				| undefined;
+
+			if (response?.ok && response.status) {
+				return response.status;
+			}
+		} catch {
+			// Fall back to the local probe below.
+		}
 
 		try {
 			await chrome.userScripts.getScripts();

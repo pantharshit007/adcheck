@@ -1,4 +1,5 @@
 /// <reference path="./shared/types.ts" />
+/// <reference path="./shared/build-info.ts" />
 
 (() => {
 	type Settings = AdCheckShared.Settings;
@@ -870,6 +871,7 @@
 		root.id = ROOT_ID;
 		root.innerHTML = `
       <div class="adcheck-widget">
+        ${AdCheckShared.IS_DEV_BUILD ? '<div class="adcheck-dev-ribbon">Dev Build</div>' : ""}
         <button class="adcheck-pull-tab" id="adcheckToggleTab" type="button" aria-label="Show or hide AdCheck">
           <span>Open</span>
         </button>
