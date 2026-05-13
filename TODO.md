@@ -19,8 +19,11 @@ _ignore this for now_
 - [ ] add a check that it should not only check for network if the call is made, also check the status returned what if the call failed/blocked.
 - [ ] clean up the popup settings section HTML string rendering by moving the section markup out of the TS file or integrating it into a more maintainable template system.
 - [ ] can introduced multi dependency on the window object, instead of only one.
+- [ ] head override support was removed because script tags in that input freeze the page and do not recover cleanly on refresh; if revisited, document that it is HTML-only or split it into a strictly safe non-script path.
 - [x] re-check the logic for showing an alert when allow user scripts setting is disabled, since currently it doesn't show it when my allow user scripts is disabled for the current site override setting.
 - [x] Is there any way to add like a diagnal banner or something to tell the developer that this is a development build and not a production build?
+- [ ] create a comprehensive documentation for the extension.
+- [ ] add current version to the popup at the bottom or any other place.
 
 ---
 

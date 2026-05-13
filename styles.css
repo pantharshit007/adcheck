@@ -1445,6 +1445,35 @@
     color: var(--adcheck-ink);
 }
 
+.adcheck-inline-help {
+    font-weight: 600;
+    color: var(--adcheck-ink-soft);
+}
+
+.adcheck-inline-field-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+}
+
+.adcheck-head-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 11px;
+	font-weight: 700;
+	color: var(--adcheck-ink-soft);
+	cursor: pointer;
+}
+
+.adcheck-head-toggle input {
+	width: 14px;
+	height: 14px;
+	margin: 0;
+	accent-color: var(--adcheck-accent);
+}
+
 .adcheck-select-wrapper {
     position: relative;
     display: flex;
@@ -1529,6 +1558,10 @@
         "Cascadia Code",
         monospace !important;
     resize: vertical;
+}
+
+.adcheck-site-override-header-input {
+    min-height: 60px;
 }
 
 .adcheck-import-export-input:focus {
