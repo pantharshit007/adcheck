@@ -1,4 +1,5 @@
 /// <reference path="./shared/types.ts" />
+/// <reference path="./shared/build-info.ts" />
 
 (() => {
 	type Settings = AdCheckShared.Settings;
@@ -166,6 +167,10 @@
 	}
 
 	function tryApplySiteOverride(rule: SiteOverrideRule): boolean {
+		return applySelectorOverride(rule);
+	}
+
+	function applySelectorOverride(rule: SiteOverrideRule): boolean {
 		const target = document.querySelector(rule.selector);
 		if (!(target instanceof Element)) {
 			return false;
@@ -175,7 +180,7 @@
 			return true;
 		}
 
-		const preparedOverride = buildInjectedNodes(rule);
+		const preparedOverride = buildInjectedNodes(rule.htmlSnippet);
 		if (preparedOverride.nodes.length > 0) {
 			insertNodesAroundTarget(target, preparedOverride.nodes, rule.placement);
 		}
@@ -192,16 +197,16 @@
 		return true;
 	}
 
-	function buildInjectedNodes(rule: SiteOverrideRule): PreparedSiteOverride {
+	function buildInjectedNodes(htmlSnippet: string): PreparedSiteOverride {
 		const template = document.createElement("template");
-		template.innerHTML = rule.htmlSnippet.trim();
+		template.innerHTML = htmlSnippet.trim();
 		const preparedOverride: PreparedSiteOverride = {
 			inlineScriptCodes: [],
 			nodes: [],
 		};
 
 		for (const node of Array.from(template.content.childNodes)) {
-			const materializedNode = materializeNode(node, preparedOverride.inlineScriptCodes);
+			const materializedNode = materializeNode(node, preparedOverride);
 			if (materializedNode) {
 				preparedOverride.nodes.push(materializedNode);
 			}
@@ -210,7 +215,7 @@
 		return preparedOverride;
 	}
 
-	function materializeNode(node: Node, inlineScriptCodes: string[]): Node | null {
+	function materializeNode(node: Node, preparedOverride: PreparedSiteOverride): Node | null {
 		if (node.nodeType === Node.TEXT_NODE) {
 			return document.createTextNode(node.textContent ?? "");
 		}
@@ -225,7 +230,7 @@
 			if (!sourceScript.src) {
 				const inlineCode = sourceScript.textContent?.trim() ?? "";
 				if (inlineCode) {
-					inlineScriptCodes.push(inlineCode);
+					preparedOverride.inlineScriptCodes.push(inlineCode);
 				}
 				return null;
 			}
@@ -234,7 +239,6 @@
 			for (const attribute of Array.from(source.attributes)) {
 				script.setAttribute(attribute.name, attribute.value);
 			}
-			script.setAttribute(APPLIED_OVERRIDE_ATTRIBUTE, window.location.hostname.toLowerCase());
 			return script;
 		}
 
@@ -244,7 +248,7 @@
 		}
 		clone.setAttribute(APPLIED_OVERRIDE_ATTRIBUTE, window.location.hostname.toLowerCase());
 		for (const child of Array.from(source.childNodes)) {
-			const materializedChild = materializeNode(child, inlineScriptCodes);
+			const materializedChild = materializeNode(child, preparedOverride);
 			if (materializedChild) {
 				clone.appendChild(materializedChild);
 			}

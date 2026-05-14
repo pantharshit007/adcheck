@@ -1,4 +1,5 @@
 /// <reference path="./shared/types.ts" />
+/// <reference path="./shared/build-info.ts" />
 
 (() => {
 	type Settings = AdCheckShared.Settings;
@@ -49,6 +50,7 @@
 	const siteOverridePermissionMessage = document.getElementById(
 		"siteOverridePermissionMessage",
 	) as HTMLParagraphElement | null;
+	const devBuildRibbon = document.getElementById("devBuildRibbon") as HTMLDivElement | null;
 	const siteOverrideEditor = document.getElementById("siteOverrideEditor") as HTMLDivElement | null;
 	const toggleSiteOverrideEditorButton = document.getElementById(
 		"toggleSiteOverrideEditorButton",
@@ -115,11 +117,11 @@
 		!toggleSiteOverrideEditorButton ||
 		!pickSiteElementButton ||
 		!clearSiteSelectionButton ||
-		!siteOverrideEnabledInput ||
-		!siteOverridePlacementSelect ||
-		!siteOverrideSnippetInput ||
-		!saveSiteOverrideButton ||
-		!deleteSiteOverrideButton
+			!siteOverrideEnabledInput ||
+			!siteOverridePlacementSelect ||
+			!siteOverrideSnippetInput ||
+			!saveSiteOverrideButton ||
+			!deleteSiteOverrideButton
 		) {
 			return;
 		}
@@ -130,6 +132,7 @@
 		populateImportExportInput(settings);
 		setImportEditorVisible(false);
 		setSiteOverrideEditorVisible(false);
+		updateDevBuildRibbon();
 		await initializeSiteOverridePanel();
 		renderIgnoreSiteControl(settings);
 
@@ -194,7 +197,11 @@
 		});
 
 		siteOverrideSnippetInput.addEventListener("input", () => {
-			void refreshUserScriptWarning(siteOverrideSnippetInput.value);
+			void refreshUserScriptWarning();
+		});
+
+		siteOverrideEnabledInput.addEventListener("change", () => {
+			void refreshUserScriptWarning();
 		});
 
 		toggleSiteOverrideEditorButton.addEventListener("click", () => {
@@ -217,6 +224,19 @@
 		hydrateSiteOverridePanel(override, popupState.pickedSelection);
 	}
 
+	function updateDevBuildRibbon(): void {
+		if (!devBuildRibbon) {
+			return;
+		}
+
+		if (AdCheckShared.IS_DEV_BUILD) {
+			devBuildRibbon.classList.remove("is-hidden");
+			return;
+		}
+
+		devBuildRibbon.remove();
+	}
+
 	function renderSiteOverrideUnavailable(): void {
 		if (!siteOverrideSiteLabel || !siteOverrideSelectionLabel || !toggleSiteOverrideEditorButton) {
 			return;
@@ -225,7 +245,7 @@
 		siteOverrideSiteLabel.textContent =
 			"Open a normal http or https page to save a site-specific override.";
 		siteOverrideSelectionLabel.textContent = "Site overrides are unavailable on this tab.";
-		void refreshUserScriptWarning("");
+		void refreshUserScriptWarning();
 		toggleSiteOverrideEditorButton.disabled = true;
 		if (pickSiteElementButton) {
 			pickSiteElementButton.disabled = true;
@@ -263,7 +283,7 @@
 		siteOverrideSnippetInput.value = override?.htmlSnippet ?? "";
 		renderPickedSelection(selection ?? selectorToSelection(override?.selector ?? ""));
 		setSiteOverrideEditorVisible(false); // always start collapsed, like other sections
-		void refreshUserScriptWarning(override?.htmlSnippet ?? "");
+		void refreshUserScriptWarning();
 	}
 
 	function renderPickedSelection(selection: SitePickerSelection | null): void {
@@ -343,7 +363,7 @@
 			return;
 		}
 
-		await refreshUserScriptWarning(htmlSnippet);
+		await refreshUserScriptWarning();
 
 		const nextOverride: SiteOverrideRule = {
 			hostname: popupState.activeSite.hostname,
@@ -392,7 +412,7 @@
 		siteOverrideEnabledInput.checked = true;
 		siteOverridePlacementSelect.value = "afterend";
 		siteOverrideSnippetInput.value = "";
-		void refreshUserScriptWarning("");
+		void refreshUserScriptWarning();
 		showStatus("Site override deleted.");
 	}
 
@@ -451,17 +471,19 @@
 		return selection;
 	}
 
-	async function refreshUserScriptWarning(htmlSnippet: string): Promise<void> {
+	async function refreshUserScriptWarning(): Promise<void> {
 		popupState.userScriptStatus = await detectUserScriptStatus();
-		renderUserScriptWarning(htmlSnippet);
+		renderUserScriptWarning();
 	}
 
-	function renderUserScriptWarning(htmlSnippet: string): void {
+	function renderUserScriptWarning(): void {
 		if (!siteOverridePermissionMessage) {
 			return;
 		}
 
-		const hasInlineScriptSnippet = hasInlineScript(htmlSnippet);
+		const hasInlineScriptSnippet = hasInlineScript(
+			siteOverrideSnippetInput?.value ?? "",
+		);
 		const isPermissionUnavailable = popupState.userScriptStatus?.available === false;
 
 		siteOverridePermissionMessage.classList.remove("is-warning");
@@ -475,16 +497,30 @@
 		siteOverridePermissionMessage.classList.remove("is-hidden");
 		siteOverridePermissionMessage.classList.add("is-warning");
 		siteOverridePermissionMessage.textContent =
-			popupState.userScriptStatus?.message ||
+		popupState.userScriptStatus?.message ||
 			"This override includes inline script blocks. Enable Allow User Scripts in AdCheck's extension details so the inline loader code can run.";
 	}
 
-	function hasInlineScript(htmlSnippet: string): boolean {
-		return /<script\b(?![^>]*\bsrc=)[^>]*>/i.test(htmlSnippet);
+	function hasInlineScript(...snippets: string[]): boolean {
+		return snippets.some((htmlSnippet) => /<script\b(?![^>]*\bsrc=)[^>]*>/i.test(htmlSnippet));
 	}
 
 	async function detectUserScriptStatus(): Promise<UserScriptStatus> {
 		const chromeMajorVersion = parseChromeMajorVersion();
+
+		try {
+			const response = (await chrome.runtime.sendMessage({
+				type: "GET_USER_SCRIPT_STATUS",
+			} satisfies AdCheckShared.RuntimeMessage)) as
+				| { ok: boolean; status?: UserScriptStatus }
+				| undefined;
+
+			if (response?.ok && response.status) {
+				return response.status;
+			}
+		} catch {
+			// Fall back to the local probe below.
+		}
 
 		try {
 			await chrome.userScripts.getScripts();
