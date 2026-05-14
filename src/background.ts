@@ -230,16 +230,61 @@
     const removeRuleIds = existingRules
       .filter((rule) => rule.id >= BLOCKED_ROUTE_RULE_ID_BASE && rule.id < BLOCKED_ROUTE_RULE_ID_BASE + 1000)
       .map((rule) => rule.id);
-		const addRules = blockedRoutes.flatMap((entry, index) => {
-			const rule = buildBlockedRouteRule(entry, BLOCKED_ROUTE_RULE_ID_BASE + index);
-			return rule ? [rule] : [];
-		});
+		const limits = getDynamicRuleLimits();
+		const addRules: chrome.declarativeNetRequest.Rule[] = [];
+		let regexRuleCount = 0;
+		let skippedBecauseOfLimit = 0;
 
-    await chrome.declarativeNetRequest.updateDynamicRules({
-      removeRuleIds,
-      addRules
-    });
+		for (const entry of blockedRoutes) {
+			const rule = buildBlockedRouteRule(entry, BLOCKED_ROUTE_RULE_ID_BASE + addRules.length);
+			if (!rule) {
+				continue;
+			}
+
+			const isRegexRule = "regexFilter" in rule.condition;
+			if (addRules.length >= limits.dynamicRuleLimit || (isRegexRule && regexRuleCount >= limits.regexRuleLimit)) {
+				skippedBecauseOfLimit += 1;
+				continue;
+			}
+
+			if (isRegexRule) {
+				regexRuleCount += 1;
+			}
+
+			addRules.push(rule);
+		}
+
+		try {
+			await chrome.declarativeNetRequest.updateDynamicRules({
+				removeRuleIds,
+				addRules
+			});
+		} catch (error: unknown) {
+			console.warn(
+				`AdCheck blocked route rules failed to sync: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return;
+		}
+
+		if (skippedBecauseOfLimit > 0) {
+			console.warn(
+				`AdCheck blocked route rules truncated to ${addRules.length} rules due to Chrome DNR limits.`,
+			);
+		}
   }
+
+	function getDynamicRuleLimits(): { dynamicRuleLimit: number; regexRuleLimit: number } {
+		const dnr = chrome.declarativeNetRequest as typeof chrome.declarativeNetRequest & {
+			MAX_NUMBER_OF_DYNAMIC_RULES?: number;
+			MAX_NUMBER_OF_UNSAFE_DYNAMIC_RULES?: number;
+			MAX_NUMBER_OF_REGEX_RULES?: number;
+		};
+
+		return {
+			dynamicRuleLimit: dnr.MAX_NUMBER_OF_DYNAMIC_RULES ?? dnr.MAX_NUMBER_OF_UNSAFE_DYNAMIC_RULES ?? 5000,
+			regexRuleLimit: dnr.MAX_NUMBER_OF_REGEX_RULES ?? 1000,
+		};
+	}
 
   function buildBlockedRouteRule(entry: BlockedRouteEntry, id: number): chrome.declarativeNetRequest.Rule | null {
     const value = entry.value.trim();

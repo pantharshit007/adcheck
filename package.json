@@ -1,6 +1,6 @@
 {
 	"name": "adcheck-extension",
-	"version": "1.1.5",
+	"version": "1.1.6",
 	"private": true,
 	"description": "AdCheck Chrome extension for validating ad tag implementations on publisher websites.",
 	"scripts": {
