@@ -17,7 +17,6 @@
 	type PreparedSiteOverride = {
 		inlineScriptCodes: string[];
 		nodes: Node[];
-		externalScriptSrcs: string[];
 	};
 
 	const pageWindow = window as Window & {
@@ -204,7 +203,6 @@
 		const preparedOverride: PreparedSiteOverride = {
 			inlineScriptCodes: [],
 			nodes: [],
-			externalScriptSrcs: [],
 		};
 
 		for (const node of Array.from(template.content.childNodes)) {
@@ -237,7 +235,6 @@
 				return null;
 			}
 
-			preparedOverride.externalScriptSrcs.push(sourceScript.src);
 			const script = document.createElement("script");
 			for (const attribute of Array.from(source.attributes)) {
 				script.setAttribute(attribute.name, attribute.value);
