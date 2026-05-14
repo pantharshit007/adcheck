@@ -1,20 +1,19 @@
 # AdCheck
 
+[![Install AdCheck Extension](docs/install-button.svg)](https://ggl.link/adcheck?utm_source=github&utm_medium=readme)
+
 ![AdCheck Extension Overview](img/hero-image-pop-up.png)
 
 AdCheck is a lightweight, framework-free Manifest V3 Chrome extension designed for ad operations and developers to validate ad tag implementations on publisher websites. It provides real-time visibility into network requests, DOM elements, and custom script behaviors.
 
-## Features
+## Documentation
 
-- **Floating Widget**: An in-page helper that provides instant feedback on the status of ad-related elements.
-- **Site Overrides**:
-  - **Element Picker**: Visually select elements on any page to target for overrides.
-  - **Custom Injection**: Inject HTML snippets or loader scripts at specific DOM locations (Before/After/Inside elements).
-- **Network Tracking**: Monitor ad-related network requests with history management.
-- **Configuration Management**:
-  - Easily import/export settings as JSON.
-  - Define custom bundles, script names, DOM IDs, CSS classes, and attributes to track.
-- **Window Globals Inspector**: Safely inspect and track values from the page's `window` object with support for deep-path access and "await bundle" dependencies.
+Detailed documentation on AdCheck's features and capabilities is available on our GitHub Pages site (served from the `docs/` folder).
+
+- [Features Overview](docs/index.md)
+- [Side Panel Widget](docs/features/widget.md)
+- [Configuration Settings](docs/features/settings.md)
+- [Site Overrides & Global Actions](docs/features/site-overrides.md)
 
 ## Tech Stack
 
@@ -69,6 +68,6 @@ This project is licensed under the [MIT License](LICENSE).
 
 ## Privacy Policy
 
-Check out the [AdCheck Privacy Policy](PRIVACY.md) for more details.
+Check out the [AdCheck Privacy Policy](PRIVACY.md) (or [docs/privacy.md](docs/privacy.md)) for more details.
 
 _*धन्यवाद*_
