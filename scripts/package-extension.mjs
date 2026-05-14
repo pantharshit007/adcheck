@@ -23,17 +23,27 @@ if (existsSync(outputPath)) {
 
 cpSync(distRoot, packagedDistRoot, { recursive: true });
 
-if (existsSync(buildInfoPath)) {
+try {
+  if (!existsSync(buildInfoPath)) {
+    throw new Error(`Missing build info file at ${buildInfoPath}`);
+  }
+
   const buildInfoSource = readFileSync(buildInfoPath, "utf8");
-  writeFileSync(
-    buildInfoPath,
-    buildInfoSource.replace("AdCheckShared.IS_DEV_BUILD = true", "AdCheckShared.IS_DEV_BUILD = false")
+  const replacedBuildInfoSource = buildInfoSource.replace(
+    "AdCheckShared.IS_DEV_BUILD = true",
+    "AdCheckShared.IS_DEV_BUILD = false",
   );
+
+  if (replacedBuildInfoSource === buildInfoSource) {
+    throw new Error(`Failed to replace dev flag in ${buildInfoPath}`);
+  }
+
+  writeFileSync(buildInfoPath, replacedBuildInfoSource);
+
+  execFileSync("zip", ["-qr", outputPath, "."], {
+    cwd: packagedDistRoot,
+    stdio: "inherit"
+  });
+} finally {
+  rmSync(packageRoot, { recursive: true, force: true });
 }
-
-execFileSync("zip", ["-qr", outputPath, "."], {
-  cwd: packagedDistRoot,
-  stdio: "inherit"
-});
-
-rmSync(packageRoot, { recursive: true, force: true });
