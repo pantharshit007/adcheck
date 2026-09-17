@@ -184,14 +184,22 @@
           return { ok: false, error: "Provide one inline script or external script URL." };
         }
 
-        await executeSiteOverrideScript(
-          tabId,
-          sender.frameId,
-          message.scriptCode,
-          message.scriptUrl,
-          message.scriptCredentials
-        );
-        return { ok: true };
+        try {
+          await executeSiteOverrideScript(
+            tabId,
+            sender.frameId,
+            message.scriptCode,
+            message.scriptUrl,
+            message.scriptCredentials,
+            sender.origin
+          );
+          return { ok: true };
+        } catch (error: unknown) {
+          return {
+            ok: false,
+            error: error instanceof Error ? error.message : "The site override script could not be executed."
+          };
+        }
       }
       case "READ_WINDOW_GLOBALS": {
         const tabId = sender.tab?.id;
@@ -212,7 +220,8 @@
     frameId: number | undefined,
     inlineCode: string | undefined,
     externalUrl: string | undefined,
-    credentials: RequestCredentials | undefined
+    credentials: RequestCredentials | undefined,
+    senderOrigin: string | undefined
   ): Promise<void> {
     const userScriptsApi = getUserScriptsApi();
     let scriptCode = inlineCode;
@@ -223,8 +232,9 @@
         throw new Error("Only HTTP and HTTPS external scripts can use the fallback loader.");
       }
 
+      const canIncludeCredentials = credentials === "include" && parsedUrl.origin === senderOrigin;
       const response = await fetch(parsedUrl.href, {
-        credentials: credentials === "omit" ? "omit" : "include"
+        credentials: canIncludeCredentials ? "include" : "omit"
       });
       if (!response.ok) {
         throw new Error(`External script fallback returned HTTP ${response.status} for ${parsedUrl.href}`);

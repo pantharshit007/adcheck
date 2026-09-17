@@ -18,6 +18,8 @@
 		| {
 			kind: "external";
 			loadResult: Promise<"loaded" | "failed">;
+			placeholder: Comment;
+			script: HTMLScriptElement;
 			scriptUrl: string;
 			scriptCredentials: RequestCredentials;
 			waitForLoad: boolean;
@@ -270,11 +272,15 @@
 				script.addEventListener("load", () => settleLoadResult("loaded"), { once: true });
 				script.addEventListener("error", () => settleLoadResult("failed"), { once: true });
 
+				const placeholder = document.createComment("adcheck-site-override-script");
 				preparedOverride.scriptSteps.push({
 					kind: "external",
 					loadResult,
+					placeholder,
+					script,
 					scriptUrl: sourceScript.src,
-					scriptCredentials: sourceScript.crossOrigin === "anonymous" ? "omit" : "include",
+					scriptCredentials:
+						sourceScript.crossOrigin === "use-credentials" ? "include" : "omit",
 					waitForLoad:
 						isClassicScript &&
 						!sourceScript.hasAttribute("async") &&
@@ -284,6 +290,7 @@
 						!sourceScript.integrity &&
 						!(window.location.protocol === "https:" && sourceScript.src.startsWith("http:")),
 				});
+				return placeholder;
 			}
 
 			return script;
@@ -321,6 +328,7 @@
 				continue;
 			}
 
+			scriptStep.placeholder.replaceWith(scriptStep.script);
 			const externalExecution = recoverFailedExternalScript(scriptStep);
 			if (scriptStep.waitForLoad) {
 				await externalExecution;
