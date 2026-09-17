@@ -176,13 +176,21 @@
 		case "SYNC_BLOCKED_ROUTE_RULES":
 			await syncBlockedRouteRules();
 			return { ok: true };
-		case "EXECUTE_SITE_OVERRIDE_INLINE_SCRIPTS": {
+		case "EXECUTE_SITE_OVERRIDE_SCRIPT": {
         const tabId = sender.tab?.id;
-        if (typeof tabId !== "number" || !Array.isArray(message.scriptCodes) || message.scriptCodes.length === 0) {
-          return { ok: false, error: "Missing tab or inline script payload." };
+        const hasInlineCode = typeof message.scriptCode === "string" && message.scriptCode.trim().length > 0;
+        const hasExternalUrl = typeof message.scriptUrl === "string" && message.scriptUrl.trim().length > 0;
+        if (typeof tabId !== "number" || hasInlineCode === hasExternalUrl) {
+          return { ok: false, error: "Provide one inline script or external script URL." };
         }
 
-        await executeSiteOverrideInlineScripts(tabId, sender.frameId, message.scriptCodes);
+        await executeSiteOverrideScript(
+          tabId,
+          sender.frameId,
+          message.scriptCode,
+          message.scriptUrl,
+          message.scriptCredentials
+        );
         return { ok: true };
       }
       case "READ_WINDOW_GLOBALS": {
@@ -199,25 +207,47 @@
     }
   }
 
-  async function executeSiteOverrideInlineScripts(
+  async function executeSiteOverrideScript(
     tabId: number,
     frameId: number | undefined,
-    scriptCodes: string[]
+    inlineCode: string | undefined,
+    externalUrl: string | undefined,
+    credentials: RequestCredentials | undefined
   ): Promise<void> {
     const userScriptsApi = getUserScriptsApi();
+    let scriptCode = inlineCode;
 
-    if (!userScriptsApi || typeof userScriptsApi.execute !== "function") {
-      throw new Error(
-        "Inline override script blocks could not run. Markup and direct external script tags may still apply. Enable Allow User Scripts for AdCheck to run inline loader code."
-      );
+    if (externalUrl) {
+      const parsedUrl = new URL(externalUrl);
+      if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+        throw new Error("Only HTTP and HTTPS external scripts can use the fallback loader.");
+      }
+
+      const response = await fetch(parsedUrl.href, {
+        credentials: credentials === "omit" ? "omit" : "include"
+      });
+      if (!response.ok) {
+        throw new Error(`External script fallback returned HTTP ${response.status} for ${parsedUrl.href}`);
+      }
+
+      scriptCode = `${await response.text()}\n//# sourceURL=${parsedUrl.href.replace(/[\r\n]/g, "")}`;
     }
 
-    await userScriptsApi.execute({
+    if (!scriptCode) {
+      throw new Error("The site override script was empty.");
+    }
+
+    const injectionResults = await userScriptsApi.execute({
       target: typeof frameId === "number" ? { tabId, frameIds: [frameId] } : { tabId },
       injectImmediately: true,
-      js: scriptCodes.map((code) => ({ code })),
-      world: "USER_SCRIPT"
+      js: [{ code: scriptCode }],
+      world: "MAIN"
     });
+
+    const injectionError = injectionResults.find((result) => result.error)?.error;
+    if (injectionError) {
+      throw new Error(injectionError);
+    }
   }
 
   async function syncBlockedRouteRules(): Promise<void> {
@@ -403,10 +433,36 @@
                 }
               }
 
+              function isSafeIdentifier(key) {
+                return /^[A-Za-z_$][\\w$]*$/.test(key);
+              }
+
+              function resolveFirstSegment(key) {
+                if (key === "window" || key === "self" || key === "globalThis") {
+                  return window;
+                }
+
+                if (key in window) {
+                  return window[key];
+                }
+
+                if (isSafeIdentifier(key)) {
+                  try {
+                    return eval(key);
+                  } catch {
+                    return window[key];
+                  }
+                }
+
+                return window[key];
+              }
+
               try {
-                const keys = String(dotPath).replace(/^window\\./, "").split(".");
-                let current = window;
-                for (const key of keys) {
+                const normalizedPath = String(dotPath).replace(/^(?:window|self|globalThis)\\./, "");
+                const keys = normalizedPath.split(".").filter(Boolean);
+                let current = keys.length > 0 ? resolveFirstSegment(keys[0]) : window;
+
+                for (const key of keys.slice(1)) {
                   if (current === null || current === undefined) break;
                   current = current[key];
                 }
@@ -455,7 +511,7 @@
 
     if (!userScriptsApi || typeof userScriptsApi.execute !== "function") {
       throw new Error(
-        "Inline override script blocks could not run. Markup and direct external script tags may still apply. Enable Allow User Scripts for AdCheck to run inline loader code."
+        "User-provided scripts could not run. Enable Allow User Scripts for AdCheck in Chrome's extension details, then reload the extension."
       );
     }
 

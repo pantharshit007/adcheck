@@ -24,7 +24,8 @@ _ignore this for now_
 - [x] Is there any way to add like a diagnal banner or something to tell the developer that this is a development build and not a production build?
 - [ ] create a comprehensive documentation for the extension.
 - [ ] add current version to the popup at the bottom or any other place.
-
+- [ ] add no ref open (open in new tab) option to extension button in our docs and readme.
+- [ ] there is some issue with the window object check evne though the player is loaded, the obj is loaded yet it shows false or not found.
 ---
 
 - [ ] get an understanding of how the network blocking works.

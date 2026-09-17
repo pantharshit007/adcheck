@@ -146,11 +146,13 @@ declare namespace AdCheckShared {
       | "SYNC_ACTION_STATE"
       | "START_SITE_PICKER"
       | "CANCEL_SITE_PICKER"
-      | "EXECUTE_SITE_OVERRIDE_INLINE_SCRIPTS"
+      | "EXECUTE_SITE_OVERRIDE_SCRIPT"
       | "READ_WINDOW_GLOBALS"
       | "SYNC_BLOCKED_ROUTE_RULES";
     allPass?: boolean;
-    scriptCodes?: string[];
+    scriptCode?: string;
+    scriptCredentials?: RequestCredentials;
+    scriptUrl?: string;
     windowGlobalPaths?: string[];
   }
 }
