@@ -14,9 +14,24 @@
 	type RuntimeMessage = AdCheckShared.RuntimeMessage;
 	type SiteOverrideRule = AdCheckShared.SiteOverrideRule;
 	type SitePickerSelection = AdCheckShared.SitePickerSelection;
+	type SiteOverrideScriptStep =
+		| {
+			kind: "external";
+			loadResult: Promise<"loaded" | "failed">;
+			placeholder: Comment;
+			script: HTMLScriptElement;
+			scriptUrl: string;
+			scriptCredentials: RequestCredentials;
+			waitForLoad: boolean;
+			canUseFallback: boolean;
+		}
+		| {
+			kind: "inline";
+			scriptCode: string;
+		};
 	type PreparedSiteOverride = {
-		inlineScriptCodes: string[];
 		nodes: Node[];
+		scriptSteps: SiteOverrideScriptStep[];
 	};
 
 	const pageWindow = window as Window & {
@@ -185,11 +200,11 @@
 			insertNodesAroundTarget(target, preparedOverride.nodes, rule.placement);
 		}
 
-		if (preparedOverride.inlineScriptCodes.length > 0) {
-			void executeInlineOverrideScripts(preparedOverride.inlineScriptCodes);
+		if (preparedOverride.scriptSteps.length > 0) {
+			void executeOverrideScriptsInOrder(preparedOverride.scriptSteps);
 		}
 
-		if (preparedOverride.nodes.length === 0 && preparedOverride.inlineScriptCodes.length === 0) {
+		if (preparedOverride.nodes.length === 0 && preparedOverride.scriptSteps.length === 0) {
 			return true;
 		}
 
@@ -201,8 +216,8 @@
 		const template = document.createElement("template");
 		template.innerHTML = htmlSnippet.trim();
 		const preparedOverride: PreparedSiteOverride = {
-			inlineScriptCodes: [],
 			nodes: [],
+			scriptSteps: [],
 		};
 
 		for (const node of Array.from(template.content.childNodes)) {
@@ -227,18 +242,57 @@
 		const source = node as HTMLElement;
 		if (source.tagName.toLowerCase() === "script") {
 			const sourceScript = source as HTMLScriptElement;
+			const isClassicScript = isClassicJavaScriptType(sourceScript.type);
 			if (!sourceScript.src) {
 				const inlineCode = sourceScript.textContent?.trim() ?? "";
-				if (inlineCode) {
-					preparedOverride.inlineScriptCodes.push(inlineCode);
+				if (inlineCode && isClassicScript) {
+					preparedOverride.scriptSteps.push({
+						kind: "inline",
+						scriptCode: inlineCode,
+					});
+					return null;
 				}
-				return null;
 			}
 
 			const script = document.createElement("script");
 			for (const attribute of Array.from(source.attributes)) {
 				script.setAttribute(attribute.name, attribute.value);
 			}
+			script.textContent = sourceScript.textContent;
+
+			if (sourceScript.src) {
+				if (!sourceScript.hasAttribute("async")) {
+					script.async = false;
+				}
+
+				let settleLoadResult: (result: "loaded" | "failed") => void = () => undefined;
+				const loadResult = new Promise<"loaded" | "failed">((resolve) => {
+					settleLoadResult = resolve;
+				});
+				script.addEventListener("load", () => settleLoadResult("loaded"), { once: true });
+				script.addEventListener("error", () => settleLoadResult("failed"), { once: true });
+
+				const placeholder = document.createComment("adcheck-site-override-script");
+				preparedOverride.scriptSteps.push({
+					kind: "external",
+					loadResult,
+					placeholder,
+					script,
+					scriptUrl: sourceScript.src,
+					scriptCredentials:
+						sourceScript.crossOrigin === "use-credentials" ? "include" : "omit",
+					waitForLoad:
+						isClassicScript &&
+						!sourceScript.hasAttribute("async") &&
+						!sourceScript.hasAttribute("defer"),
+					canUseFallback:
+						isClassicScript &&
+						!sourceScript.integrity &&
+						!(window.location.protocol === "https:" && sourceScript.src.startsWith("http:")),
+				});
+				return placeholder;
+			}
+
 			return script;
 		}
 
@@ -256,14 +310,68 @@
 		return clone;
 	}
 
-	async function executeInlineOverrideScripts(scriptCodes: string[]): Promise<void> {
+	function isClassicJavaScriptType(type: string): boolean {
+		const normalizedType = type.trim().toLowerCase();
+		return (
+			!normalizedType ||
+			normalizedType === "text/javascript" ||
+			normalizedType === "application/javascript" ||
+			normalizedType === "text/ecmascript" ||
+			normalizedType === "application/ecmascript"
+		);
+	}
+
+	async function executeOverrideScriptsInOrder(scriptSteps: SiteOverrideScriptStep[]): Promise<void> {
+		for (const scriptStep of scriptSteps) {
+			if (scriptStep.kind === "inline") {
+				await executeOverrideScript({ scriptCode: scriptStep.scriptCode });
+				continue;
+			}
+
+			scriptStep.placeholder.replaceWith(scriptStep.script);
+			const externalExecution = recoverFailedExternalScript(scriptStep);
+			if (scriptStep.waitForLoad) {
+				await externalExecution;
+			} else {
+				void externalExecution;
+			}
+		}
+	}
+
+	async function recoverFailedExternalScript(
+		scriptStep: Extract<SiteOverrideScriptStep, { kind: "external" }>,
+	): Promise<void> {
+		if ((await scriptStep.loadResult) === "loaded") {
+			return;
+		}
+
+		if (!scriptStep.canUseFallback) {
+			console.warn(
+				`AdCheck site override: ${scriptStep.scriptUrl} could not load. Module, integrity-protected, and mixed-content scripts cannot use the extension fallback.`,
+			);
+			return;
+		}
+
+		await executeOverrideScript({
+			scriptCredentials: scriptStep.scriptCredentials,
+			scriptUrl: scriptStep.scriptUrl,
+		});
+	}
+
+	async function executeOverrideScript(payload: {
+		scriptCode?: string;
+		scriptCredentials?: RequestCredentials;
+		scriptUrl?: string;
+	}): Promise<void> {
 		const response = await sendMessage<{ ok: boolean; error?: string }>({
-			type: "EXECUTE_SITE_OVERRIDE_INLINE_SCRIPTS",
-			scriptCodes,
+			type: "EXECUTE_SITE_OVERRIDE_SCRIPT",
+			...payload,
 		});
 
-		if (response?.ok === false && response.error) {
-			console.warn(`AdCheck site override: ${response.error}`);
+		if (!response?.ok) {
+			console.warn(
+				`AdCheck site override: ${response?.error ?? "The script could not be executed."}`,
+			);
 		}
 	}
 
