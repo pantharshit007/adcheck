@@ -2,7 +2,7 @@
 
 [![Install AdCheck Extension](docs/install-button.svg)](https://ggl.link/adcheck?utm_source=github&utm_medium=readme)
 
-![AdCheck Extension Overview](img/hero-image-pop-up.png)
+![AdCheck Extension Overview](img/hero-image-pop-up-2.png)
 
 AdCheck is a lightweight, framework-free Manifest V3 Chrome extension designed for ad operations and developers to validate ad tag implementations on publisher websites. It provides real-time visibility into network requests, DOM elements, and custom script behaviors.
 
