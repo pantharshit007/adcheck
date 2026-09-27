@@ -21,6 +21,7 @@ namespace AdCheckShared {
 			ignoredDomains: [],
 			windowGlobals: [],
 			blockedRoutesEnabled: true,
+            blockingHostname: "",
 			blockedRoutes: [],
 		};
 
@@ -28,7 +29,7 @@ namespace AdCheckShared {
 		{
 			key: "bundles",
 			title: "Bundle or script names",
-			description: "Tell AdCheck which ad scripts should load on the page.",
+			description: "Script resources only. Use a filename, url:substring, or regex:pattern (case-sensitive).",
 			placeholder: "e.g. adscript.js",
 		},
 		{
@@ -84,6 +85,7 @@ namespace AdCheckShared {
 			ignoredDomains: [...DEFAULT_SETTINGS.ignoredDomains],
 			windowGlobals: DEFAULT_SETTINGS.windowGlobals.map((entry) => ({ ...entry })),
 			blockedRoutesEnabled: DEFAULT_SETTINGS.blockedRoutesEnabled,
+            blockingHostname: DEFAULT_SETTINGS.blockingHostname,
 			blockedRoutes: DEFAULT_SETTINGS.blockedRoutes.map((entry) => ({ ...entry })),
 		};
 	}
@@ -112,6 +114,7 @@ namespace AdCheckShared {
 				(candidate as Record<string, unknown>).windowGlobals,
 				defaults.windowGlobals,
 			),
+			blockingHostname: typeof candidate.blockingHostname === "string" ? normalizeIgnoredDomain(candidate.blockingHostname) : "",
 			blockedRoutesEnabled:
 				typeof candidate.blockedRoutesEnabled === "boolean"
 					? candidate.blockedRoutesEnabled
@@ -354,4 +357,31 @@ namespace AdCheckShared {
 
 		return entries;
 	}
+  export function matchesBundle(pattern: string, url: string, resourceType: string): boolean {
+    if (resourceType !== "script") return false;
+    try {
+      if (pattern.startsWith("regex:")) return new RegExp(pattern.slice(6)).test(url);
+      if (pattern.startsWith("url:")) return url.includes(pattern.slice(4));
+      return new URL(url).pathname.split("/").pop()?.toLowerCase() === pattern.replace(/^filename:/, "").toLowerCase();
+    } catch { return false; }
+  }
+
+  export function redactRequestUrl(value: string): string {
+    try { const url = new URL(value); return url.origin + url.pathname; }
+    catch { return ""; }
+  }
+
+  export function parseCookieString(value: string): Map<string, string> {
+    const result = new Map<string, string>();
+    for (const pair of value.split(";")) {
+      const index = pair.indexOf("=");
+      if (index < 0) continue;
+      const name = pair.slice(0, index).trim();
+      const raw = pair.slice(index + 1).trim();
+      try { result.set(name, decodeURIComponent(raw)); }
+      catch { result.set(name, raw); }
+    }
+    return result;
+  }
+
 }

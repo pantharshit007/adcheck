@@ -204,7 +204,10 @@
 						</button>
 					</div>
 
-					<div class="adcheck-import-export-actions">
+					<label>Export contents <select id="exportScope"><option value="settings">Settings only</option><option value="full">Settings and site overrides</option></select></label>
+          <label>Import overrides <select id="importConflictMode"><option value="merge">Merge (import wins conflicts)</option><option value="replace">Replace all overrides</option><option value="skip">Merge (skip conflicts)</option></select></label>
+          <p id="importPreview" role="status"></p>
+          <div class="adcheck-import-export-actions">
 						<input id="importFileInput" type="file" accept="application/json,.json" hidden />
 						<button
 							class="adcheck-button adcheck-button-secondary adcheck-button-compact"

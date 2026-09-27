@@ -1747,3 +1747,7 @@
         min-width: 0;
     }
 }
+
+[data-blocked-route-status] { grid-column: 2; grid-row: 2; font-size: 12px; overflow-wrap: anywhere; }
+[data-blocked-route-remove] { grid-column: 3; grid-row: 1; }
+#globalPermissionWarning:not(:empty), #importPreview:not(:empty) { padding: 10px; background: #fff3cd; color: #533f03; overflow-wrap: anywhere; }

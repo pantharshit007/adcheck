@@ -149,9 +149,10 @@
 		});
 
 		exportButton.addEventListener("click", () => {
-			exportSettings();
+			void exportSettings();
 		});
 
+		importExportInput.addEventListener("input", previewBackup);
 		importFileButton.addEventListener("click", () => {
 			importFileInput.click();
 		});
@@ -218,7 +219,7 @@
 			return;
 		}
 
-		siteOverrideSiteLabel!.textContent = `Saved separately for ${popupState.activeSite.hostname}. These overrides do not affect import or export settings.`;
+		siteOverrideSiteLabel!.textContent = `Saved separately for ${popupState.activeSite.hostname}. Include these in a full configuration backup. Script side effects require a page reload to undo.`;
 		popupState.pickedSelection = await loadSiteSelection(popupState.activeSite.hostname);
 		const override = await loadSiteOverride(popupState.activeSite.hostname);
 		hydrateSiteOverridePanel(override, popupState.pickedSelection);
@@ -485,10 +486,12 @@
 			siteOverrideSnippetInput?.value ?? "",
 		);
 		const isPermissionUnavailable = popupState.userScriptStatus?.available === false;
+    const globalWarning = document.getElementById("globalPermissionWarning");
+    if (globalWarning) globalWarning.textContent = isPermissionUnavailable && collectSettingsFromForm().windowGlobals.length ? (popupState.userScriptStatus?.message ?? "Window global inspection requires Allow User Scripts.") : "";
 
 		siteOverridePermissionMessage.classList.remove("is-warning");
 
-		if (!hasInlineScriptSnippet || !isPermissionUnavailable) {
+		if ((!hasInlineScriptSnippet && collectSettingsFromForm().windowGlobals.length === 0) || !isPermissionUnavailable) {
 			siteOverridePermissionMessage.classList.add("is-hidden");
 			siteOverridePermissionMessage.textContent = "";
 			return;
@@ -595,14 +598,17 @@
 		const blockedRoutesSection = renderBlockedRoutesSection(settings);
 		formRoot.innerHTML =
 			before.map((s) => renderSection(s, settings)).join("") +
-			windowGlobalsSection +
+			windowGlobalsSection + '<p id="globalPermissionWarning" role="alert"></p>' +
 			beforeBlockedRoutes.map((s) => renderSection(s, settings)).join("") +
 			blockedRoutesSection +
 			afterBlockedRoutes.map((s) => renderSection(s, settings)).join("");
 
+		void refreshBlockingStatus();
+		void refreshUserScriptWarning();
 		bindSectionActions();
 		bindBlockedRouteActions();
 		bindWindowGlobalsActions();
+		formRoot.oninput = () => { renderUserScriptWarning(); };
 		renderIgnoreSiteControl(settings);
 	}
 
@@ -902,60 +908,79 @@
 			return;
 		}
 
-		const nextSettings = parseImportedSettings(importExportInput.value);
-		if (!nextSettings) {
-			showStatus("Invalid JSON settings.");
-			return;
-		}
+    const backup = parseBackup(importExportInput.value);
+    if (!backup) { showStatus("Invalid backup JSON or unsupported version."); return; }
+    if (backup.overrides) {
+      const stored = await chrome.storage.local.get(AdCheckShared.SITE_OVERRIDE_STORAGE_KEY);
+      const existing = AdCheckShared.normalizeSiteOverrides(stored[AdCheckShared.SITE_OVERRIDE_STORAGE_KEY]);
+      const mode = (document.getElementById("importConflictMode") as HTMLSelectElement).value;
+      const merged = new Map((mode === "replace" ? [] : existing).map(rule => [rule.hostname, rule]));
+      for (const rule of backup.overrides) {
+        if (mode !== "skip" || !merged.has(rule.hostname)) merged.set(rule.hostname, rule);
+      }
+      await chrome.storage.local.set({[AdCheckShared.SITE_OVERRIDE_STORAGE_KEY]: [...merged.values()]});
+    }
+    await persistSettings(backup.settings, "Imported configuration applied.");
+    await initializeSiteOverridePanel();
+  }
 
-		renderSettingsForm(nextSettings);
-		await persistSettings(nextSettings, "Imported settings applied.");
-	}
+  async function importSettingsFromFile(): Promise<void> {
+    const file = importFileInput?.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    importFileInput!.value = "";
+    importExportInput!.value = text;
+    setImportEditorVisible(true);
+    previewBackup();
+  }
 
-	async function importSettingsFromFile(): Promise<void> {
-		if (!importFileInput) {
-			return;
-		}
+  function parseBackup(text: string): {settings: Settings; overrides?: SiteOverrideRule[]; errors: string[]} | null {
+    try {
+      const raw = JSON.parse(text);
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+      if (raw.version !== undefined && raw.version !== 1) return null;
+      const settings = raw.version === 1 ? raw.settings : raw;
+      if (!settings || typeof settings !== "object" || Array.isArray(settings)) return null;
+      const errors: string[] = [];
+      let overrides: SiteOverrideRule[] | undefined;
+      if (raw.version === 1 && raw.overrides !== undefined) {
+        if (!Array.isArray(raw.overrides)) return null;
+        overrides = [];
+        for (const entry of raw.overrides) {
+          const valid = AdCheckShared.normalizeSiteOverrides([entry])[0];
+          try {
+            if (!valid || typeof entry.enabled !== "boolean" || !Number.isFinite(entry.updatedAt) || !/^[a-z0-9.-]+$/i.test(valid.hostname) || !["beforebegin", "afterbegin", "beforeend", "afterend"].includes(entry.placement)) throw new Error("Invalid entry");
+            document.querySelector(valid.selector);
+            overrides.push(valid);
+          } catch { errors.push(`${entry?.hostname ?? "Unknown hostname"}: invalid override; skipped`); }
+        }
+      }
+      return {settings: AdCheckShared.mergeSettings(settings), overrides, errors};
+    } catch { return null; }
+  }
 
-		const file = importFileInput.files?.[0];
-		if (!file) {
-			return;
-		}
+  async function previewBackup(): Promise<void> {
+    const backup = parseBackup(importExportInput?.value ?? "");
+    const stored = await chrome.storage.local.get(AdCheckShared.SITE_OVERRIDE_STORAGE_KEY);
+    const existing = AdCheckShared.normalizeSiteOverrides(stored[AdCheckShared.SITE_OVERRIDE_STORAGE_KEY]);
+    const preview = document.getElementById("importPreview");
+    if (preview) preview.textContent = backup
+      ? `Settings will be replaced. Override hostnames: ${backup.overrides?.map(rule => rule.hostname).join(", ") || "none"}. ${backup.errors.join("; ")} ${backup.overrides ? `Existing override hostnames (all removed by Replace): ${existing.map(rule => rule.hostname).join(", ") || "none"}.` : "This settings-only backup leaves overrides unchanged."} Choose how to handle overrides, then Apply.`
+      : "Invalid backup JSON or unsupported version.";
+  }
 
-		const text = await file.text();
-		const nextSettings = parseImportedSettings(text);
-		importFileInput.value = "";
-
-		if (!nextSettings) {
-			showStatus("Selected file has invalid JSON.");
-			return;
-		}
-
-		setImportEditorVisible(true);
-		renderSettingsForm(nextSettings);
-		await persistSettings(nextSettings, `Imported ${file.name}.`);
-	}
-
-	function exportSettings(): void {
-		const settings = collectSettingsFromForm();
-		const serialized = serializeSettings(settings);
-
-		if (importExportInput) {
-			importExportInput.value = serialized;
-			setImportEditorVisible(true);
-			importExportInput.select();
-		}
-
-		const blob = new Blob([serialized], { type: "application/json" });
-		const url = URL.createObjectURL(blob);
-		const anchor = document.createElement("a");
-		anchor.href = url;
-		anchor.download = "adcheck-settings.json";
-		anchor.click();
-		URL.revokeObjectURL(url);
-
-		showStatus("Settings exported.");
-	}
+  async function exportSettings(): Promise<void> {
+    const full = (document.getElementById("exportScope") as HTMLSelectElement).value === "full";
+    const stored = full ? await chrome.storage.local.get(AdCheckShared.SITE_OVERRIDE_STORAGE_KEY) : {};
+    const serialized = JSON.stringify({version: 1, settings: collectSettingsFromForm(), ...(full ? {overrides: AdCheckShared.normalizeSiteOverrides(stored[AdCheckShared.SITE_OVERRIDE_STORAGE_KEY])} : {})}, null, 2);
+    importExportInput!.value = serialized;
+    setImportEditorVisible(true);
+    previewBackup();
+    const url = URL.createObjectURL(new Blob([serialized], {type: "application/json"}));
+    const anchor = document.createElement("a"); anchor.href = url; anchor.download = "adcheck-configuration.json"; anchor.click();
+    URL.revokeObjectURL(url);
+    showStatus("Configuration exported.");
+  }
 
 	function collectSettingsFromForm(): Settings {
 		const base = AdCheckShared.cloneDefaultSettings();
@@ -984,6 +1009,7 @@
 		base.windowGlobals = collectWindowGlobalsFromForm();
 		base.blockedRoutes = collectBlockedRoutesFromForm();
 		base.blockedRoutesEnabled = collectBlockedRoutesEnabled();
+		base.blockingHostname = AdCheckShared.normalizeIgnoredDomain((document.getElementById("blockingHostname") as HTMLInputElement | null)?.value ?? "");
 
 		return base;
 	}
@@ -1023,19 +1049,6 @@
 		}
 
 		importExportInput.value = serializeSettings(settings);
-	}
-
-	function parseImportedSettings(value: string): Settings | null {
-		const trimmed = value.trim();
-		if (!trimmed) {
-			return null;
-		}
-
-		try {
-			return AdCheckShared.mergeSettings(JSON.parse(trimmed) as Partial<Settings>);
-		} catch {
-			return null;
-		}
 	}
 
 	function serializeSettings(settings: Settings): string {
@@ -1173,7 +1186,10 @@
 		        <div class="adcheck-blocked-routes-master">
 		          <div>
 		            <p class="adcheck-inline-field-label">Enable route blocking</p>
-		            <p class="adcheck-field-help">Disabled rules stay saved but do not block requests.</p>
+		            <p class="adcheck-field-help">Blocks subresource requests initiated by this hostname in tabs on this exact hostname. Pausing AdCheck or ignoring the site disables blocking. Save to apply. Regex: /pattern/ is case-sensitive; /pattern/i, bare patterns and URL filters ignore case. Other flags are unsupported.</p>
+                <label>Blocking hostname <input id="blockingHostname" value="${escapeHtml(settings.blockingHostname)}" placeholder="publisher.example" /></label>
+                <button type="button" id="disableAllBlocking">Disable all blocking now</button>
+                <p id="blockingStatus" role="status"></p>
 		          </div>
 		          <label class="adcheck-toggle adcheck-override-toggle" aria-label="Enable route blocking">
 		            <input id="blockedRoutesToggle" type="checkbox" ${settings.blockedRoutesEnabled ? "checked" : ""} />
@@ -1201,7 +1217,8 @@
 		      <input type="checkbox" data-blocked-route-enabled ${entry.enabled ? "checked" : ""} />
 		    </label>
 		    <input class="adcheck-entry-input adcheck-blocked-route-input" type="text" value="${escapeHtml(entry.value)}" placeholder="e.g. /ads\/|tracking" data-blocked-route-value />
-		    <button class="adcheck-row-remove" type="button" data-blocked-route-remove aria-label="Remove blocked route">×</button>
+		    <span data-blocked-route-status role="status">Saved; awaiting validation</span>
+            <button class="adcheck-row-remove" type="button" data-blocked-route-remove aria-label="Remove blocked route">×</button>
 		  </div>
 		`;
 	}
@@ -1212,6 +1229,10 @@
 			return;
 		}
 
+    document.getElementById("disableAllBlocking")?.addEventListener("click", async () => {
+      const settings = collectSettingsFromForm(); settings.blockedRoutesEnabled = false;
+      await persistSettings(settings, "All AdCheck blocking disabled.");
+    });
 		const addButton = formRoot?.querySelector<HTMLButtonElement>("[data-blocked-route-add]");
 		if (addButton) {
 			addButton.addEventListener("click", (event) => {
@@ -1230,6 +1251,8 @@
 		for (const input of Array.from(blockedRoutesList.querySelectorAll<HTMLInputElement>("[data-blocked-route-value]"))) {
 			input.addEventListener("input", () => {
 				persistBlockedRoutesState();
+        const label = input.closest("[data-blocked-route-row]")?.querySelector("[data-blocked-route-status]");
+        if (label) label.textContent = "Unsaved; save to validate and install.";
 			});
 		}
 
@@ -1258,6 +1281,20 @@
 		bindBlockedRouteActions();
 		row.querySelector<HTMLInputElement>("[data-blocked-route-value]")?.focus();
 	}
+
+  async function refreshBlockingStatus(): Promise<void> {
+    try {
+      const response = await chrome.runtime.sendMessage({type: "SYNC_BLOCKED_ROUTE_RULES"}) as {installedCount?: number; statuses?: {value: string; state: string; message: string}[]};
+      const summary = document.getElementById("blockingStatus");
+      if (summary) summary.textContent = `${response.installedCount ?? 0} rules installed in Chrome.`;
+      for (const row of Array.from(document.querySelectorAll<HTMLElement>("[data-blocked-route-row]"))) {
+        const value = row.querySelector<HTMLInputElement>("[data-blocked-route-value]")?.value;
+        const status = response.statuses?.find(item => item.value === value);
+        const label = row.querySelector<HTMLElement>("[data-blocked-route-status]");
+        if (label && status) label.textContent = `${status.state}: ${status.message}`;
+      }
+    } catch { const summary = document.getElementById("blockingStatus"); if (summary) summary.textContent = "Could not verify installed blocking rules."; }
+  }
 
 	function persistBlockedRoutesState(): void {
 		const settings = collectSettingsFromForm();

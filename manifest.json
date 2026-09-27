@@ -4,10 +4,8 @@
 	"description": "Debug and verify ad tag implementations on publisher websites.",
 	"version": "1.1.7",
 	"permissions": [
-		"activeTab",
 		"storage",
 		"webRequest",
-		"tabs",
 		"userScripts",
 		"declarativeNetRequest"
 	],

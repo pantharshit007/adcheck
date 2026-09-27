@@ -8,6 +8,33 @@ Priorities use this scale:
 - **P1:** Important reliability or usability problem with a reasonable workaround.
 - **P2:** Product improvement, maintainability work, or lower-risk correctness issue.
 
+## Implementation status — September 27, 2026
+
+All items below are implemented on `fix/engineering-backlog`. Validation and native
+Chrome integration steps are recorded in [tests/README.md](tests/README.md).
+Automated behavior checks and browser DOM fixtures pass; native Chrome extension
+loading and DNR enforcement have not been exercised in the collaborative browser.
+
+- Network updates use a synchronous reducer, navigation-scoped pending requests,
+  and ordered, batched session persistence. URLs are redacted after matching.
+- Bundle checks require script resources and successful HTTP responses. Bare names
+  match filenames; `url:` and `regex:` select explicit alternatives. Existing
+  substring configurations may need a `url:` prefix.
+- Overrides track inserted nodes, replace reversible markup, cancel remaining
+  script steps, and show selector errors. Executed script effects require reload.
+- Blocking now requires a selected hostname and uses session rules scoped to
+  eligible tabs and initiators. Existing browser-wide dynamic rules are removed.
+  The popup reports Chrome validation, installation, limits, and disable state.
+- Global checks preflight user-script access; checks run single-flight with stale
+  results discarded. Cookie decoding falls back to raw malformed values.
+- Version 1 backups optionally include overrides, preview hostnames and errors,
+  and support merge, replace, and skip-conflict policies. Legacy settings import
+  remains supported.
+- Privacy documentation covers Sync, local and session retention, URL redaction,
+  and each retained permission. Redundant `tabs` and `activeTab` were removed.
+
+The original problem descriptions and acceptance criteria follow for reference.
+
 ## P0: Make Network Tracking Atomic Across Concurrent Requests
 
 **Problem:** `webRequest` callbacks update the same per-tab state asynchronously. Two requests that finish together can read the same old state and overwrite each other. A late event from the previous navigation can also appear in the new page's history.

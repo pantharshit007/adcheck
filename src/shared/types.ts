@@ -43,6 +43,7 @@ declare namespace AdCheckShared {
     ignoredDomains: string[];
     windowGlobals: WindowGlobalEntry[];
     blockedRoutesEnabled: boolean;
+    blockingHostname: string;
     blockedRoutes: BlockedRouteEntry[];
   }
 
@@ -60,9 +61,12 @@ declare namespace AdCheckShared {
     loadTimeMs: number | null;
     status: "completed" | "error";
     error?: string;
+    statusCode?: number;
+    matchedChecks?: string[];
   }
 
   interface ActiveNetworkRequest {
+    matchedChecks?: string[];
     url: string;
     requestId: string;
     resourceType: string;

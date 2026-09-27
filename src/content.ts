@@ -99,7 +99,7 @@
 
 	if (!pageWindow.__ADCHECK_BOOTSTRAPPED__) {
 		pageWindow.__ADCHECK_BOOTSTRAPPED__ = true;
-		void bootstrap();
+		queueMicrotask(() => { void bootstrap(); });
 	}
 
 	async function bootstrap(): Promise<void> {
@@ -136,8 +136,15 @@
 		});
 	}
 
+	let overrideGeneration = 0;
+  let overrideSync = 0;
+  let overrideError = "";
+	let overrideNodes: Node[] = [];
+	let overrideTarget: Element | null = null;
 	async function syncSiteOverride(): Promise<void> {
+		const generation = ++overrideSync;
 		const overrides = await loadSiteOverrides();
+		if (generation !== overrideSync) return;
 		const nextOverride = AdCheckShared.findSiteOverrideForHostname(
 			overrides,
 			window.location.hostname,
@@ -148,6 +155,8 @@
 			return;
 		}
 
+		if (JSON.stringify(nextOverride) === JSON.stringify(state.activeSiteOverride)) return;
+		teardownSiteOverride();
 		state.activeSiteOverride = nextOverride;
 		applySiteOverrideSoon();
 	}
@@ -182,7 +191,8 @@
 	}
 
 	function tryApplySiteOverride(rule: SiteOverrideRule): boolean {
-		return applySelectorOverride(rule);
+		try { return applySelectorOverride(rule); }
+		catch (error) { overrideError = `Site override could not apply: ${String(error)}. Edit or re-pick its target in the popup.`; renderWidget(); return true; }
 	}
 
 	function applySelectorOverride(rule: SiteOverrideRule): boolean {
@@ -191,24 +201,27 @@
 			return false;
 		}
 
-		if (document.querySelector(`[${APPLIED_OVERRIDE_ATTRIBUTE}="${cssEscape(rule.hostname)}"]`)) {
+		if (overrideTarget === target && target.hasAttribute(APPLIED_OVERRIDE_ATTRIBUTE)) {
 			return true;
 		}
 
 		const preparedOverride = buildInjectedNodes(rule.htmlSnippet);
+		const collectNodes = (node: Node): Node[] => [node, ...Array.from(node.childNodes).flatMap(collectNodes)];
+		overrideNodes = [...preparedOverride.nodes.flatMap(collectNodes), ...preparedOverride.scriptSteps.flatMap(step => step.kind === "external" ? [step.script] : [])];
+		overrideTarget = target;
 		if (preparedOverride.nodes.length > 0) {
 			insertNodesAroundTarget(target, preparedOverride.nodes, rule.placement);
 		}
 
 		if (preparedOverride.scriptSteps.length > 0) {
-			void executeOverrideScriptsInOrder(preparedOverride.scriptSteps);
+			void executeOverrideScriptsInOrder(preparedOverride.scriptSteps, overrideGeneration).catch(error => console.warn("AdCheck override script failed:", error));
 		}
 
 		if (preparedOverride.nodes.length === 0 && preparedOverride.scriptSteps.length === 0) {
 			return true;
 		}
 
-		target.setAttribute(APPLIED_OVERRIDE_ATTRIBUTE, rule.hostname);
+		target.setAttribute(APPLIED_OVERRIDE_ATTRIBUTE, `${rule.hostname}:${overrideGeneration}`);
 		return true;
 	}
 
@@ -321,27 +334,29 @@
 		);
 	}
 
-	async function executeOverrideScriptsInOrder(scriptSteps: SiteOverrideScriptStep[]): Promise<void> {
+	async function executeOverrideScriptsInOrder(scriptSteps: SiteOverrideScriptStep[], generation: number): Promise<void> {
 		for (const scriptStep of scriptSteps) {
+			if (generation !== overrideGeneration) return;
 			if (scriptStep.kind === "inline") {
 				await executeOverrideScript({ scriptCode: scriptStep.scriptCode });
 				continue;
 			}
 
 			scriptStep.placeholder.replaceWith(scriptStep.script);
-			const externalExecution = recoverFailedExternalScript(scriptStep);
+			const externalExecution = recoverFailedExternalScript(scriptStep, generation);
 			if (scriptStep.waitForLoad) {
 				await externalExecution;
 			} else {
-				void externalExecution;
+				void externalExecution.catch(error => console.warn("AdCheck external script failed:", error));
 			}
 		}
 	}
 
 	async function recoverFailedExternalScript(
 		scriptStep: Extract<SiteOverrideScriptStep, { kind: "external" }>,
+    generation: number,
 	): Promise<void> {
-		if ((await scriptStep.loadResult) === "loaded") {
+		if ((await scriptStep.loadResult) === "loaded" || generation !== overrideGeneration) {
 			return;
 		}
 
@@ -414,6 +429,12 @@
 	}
 
 	function teardownSiteOverride(): void {
+    overrideGeneration++;
+		for (const node of overrideNodes) node.parentNode?.removeChild(node);
+		overrideNodes = [];
+		overrideTarget?.removeAttribute(APPLIED_OVERRIDE_ATTRIBUTE);
+		overrideTarget = null;
+		overrideError = "";
 		state.activeSiteOverride = null;
 		stopSiteOverrideObserver();
 	}
@@ -572,6 +593,7 @@
 	}
 
 	async function applySettings(nextSettings: Settings): Promise<void> {
+		checkGeneration++;
 		state.settings = nextSettings;
 
 		if (!nextSettings.enabled || shouldIgnoreCurrentPage(nextSettings)) {
@@ -584,52 +606,44 @@
 		await runChecks(true);
 	}
 
-	async function runChecks(resetDeadline: boolean): Promise<void> {
-		if (!state.settings.enabled || shouldIgnoreCurrentPage(state.settings)) {
-			return;
-		}
+  let checkGeneration = 0;
+  let checkRunning = false;
+  let checkQueued = false;
+  let resetQueued = false;
+  async function runChecks(resetDeadline: boolean): Promise<void> {
+    if (resetDeadline) checkGeneration++;
+    checkQueued = true;
+    resetQueued ||= resetDeadline;
+    if (checkRunning) return;
+    checkRunning = true;
+    try {
+      while (checkQueued) {
+        checkQueued = false;
+        const reset = resetQueued;
+        resetQueued = false;
+        if (!state.settings.enabled || shouldIgnoreCurrentPage(state.settings)) continue;
+        const generation = checkGeneration;
+        if (reset) {
+          stopPolling();
+          state.deadlineAt = Date.now() + AdCheckShared.DEFAULT_WAIT_MS;
+          scheduleDeadlineRender();
+        }
+        const network = await getNetworkState(reset ? "REFRESH_TAB_NETWORK_STATE" : "GET_TAB_NETWORK_STATE");
+        if (generation !== checkGeneration) continue;
+        state.networkState = network;
+        const snapshot = buildSnapshot();
+        snapshot.windowGlobals = await buildWindowGlobalResults(snapshot);
+        if (generation !== checkGeneration) continue;
+        state.snapshot = snapshot;
+        renderWidget();
+        syncPollingState();
+      }
+    } finally { checkRunning = false; }
+  }
 
-		if (resetDeadline) {
-			stopPolling();
-		}
-
-		if (resetDeadline) {
-			state.deadlineAt = Date.now() + AdCheckShared.DEFAULT_WAIT_MS;
-			scheduleDeadlineRender();
-		}
-
-		state.networkState = await getNetworkState(
-			resetDeadline ? "REFRESH_TAB_NETWORK_STATE" : "GET_TAB_NETWORK_STATE",
-		);
-		state.snapshot = buildSnapshot();
-		if (state.settings.windowGlobals.length > 0) {
-			state.snapshot.windowGlobals = await buildWindowGlobalResults();
-		}
-		renderWidget();
-
-		syncPollingState();
-	}
-
-	async function syncNetworkAndRefresh(resetDeadline: boolean): Promise<void> {
-		if (!state.settings.enabled || shouldIgnoreCurrentPage(state.settings)) {
-			return;
-		}
-
-		if (!resetDeadline && !hasPendingChecks()) {
-			return;
-		}
-
-		state.networkState = await getNetworkState(
-			resetDeadline ? "REFRESH_TAB_NETWORK_STATE" : "GET_TAB_NETWORK_STATE",
-		);
-		state.snapshot = buildSnapshot();
-		if (state.settings.windowGlobals.length > 0) {
-			state.snapshot.windowGlobals = await buildWindowGlobalResults();
-		}
-		renderWidget();
-
-		syncPollingState();
-	}
+  async function syncNetworkAndRefresh(resetDeadline: boolean): Promise<void> {
+    await runChecks(resetDeadline);
+  }
 
 	function buildSnapshot(): PageCheckSnapshot {
 		return {
@@ -644,12 +658,18 @@
 		};
 	}
 
-	async function buildWindowGlobalResults(): Promise<WindowGlobalCheckResult[]> {
+	async function buildWindowGlobalResults(snapshot: PageCheckSnapshot): Promise<WindowGlobalCheckResult[]> {
 		const entries = state.settings.windowGlobals;
 		if (entries.length === 0) {
 			return [];
 		}
 
+    const capability = await sendMessage<{status?: AdCheckShared.UserScriptStatus}>({type: "GET_USER_SCRIPT_STATUS"});
+    if (!capability?.status?.available) return entries.map(entry => ({
+      key: `windowGlobal:${entry.path}`, label: entry.path, status: "fail",
+      explanation: HELP_COPY.windowGlobals, detail: capability?.status?.message || "Window global inspection needs Allow User Scripts in Chrome extension details. Reload AdCheck after enabling it.",
+      path: entry.path, rawValue: "", valueType: "error", isLargeObject: false
+    }));
 		const results: WindowGlobalCheckResult[] = [];
 		const pathsToRead: string[] = [];
 		const pendingIndices: number[] = [];
@@ -658,7 +678,7 @@
 			const entry = entries[i];
 
 			if (entry.awaitBundle) {
-				const bundlePassed = state.snapshot.bundles.some(
+				const bundlePassed = snapshot.bundles.some(
 					(bundle) =>
 						bundle.label.toLowerCase() === entry.awaitBundle.toLowerCase() &&
 						bundle.status === "pass",
@@ -760,24 +780,13 @@
 	}
 
 	function buildBundleResults(): BundleCheckResult[] {
-		const performanceEntries = performance.getEntriesByType("resource");
-
-		return state.settings.bundles.map((bundleName) => {
-			const normalized = bundleName.toLowerCase();
-			const matchingHistory = state.networkState.history.filter((entry) => {
-				if (entry.resourceType === "main_frame" || entry.resourceType === "sub_frame") {
-					return false;
-				}
-				return entry.url.toLowerCase().includes(normalized);
-			});
-			const matchingCompleted = matchingHistory.find((entry) => entry.status === "completed");
-			const matchingError = matchingHistory.find((entry) => entry.status === "error");
-			const matchingActive = state.networkState.activeRequests.find((entry) =>
-				entry.url.toLowerCase().includes(normalized),
-			);
-			const matchingPerformanceEntry = performanceEntries.find((entry) =>
-				entry.name.toLowerCase().includes(normalized),
-			);
+    return state.settings.bundles.map((bundleName) => {
+      const matches = (entry: AdCheckShared.ActiveNetworkRequest) => entry.resourceType === "script" &&
+        (entry.matchedChecks?.includes(bundleName) ?? AdCheckShared.matchesBundle(bundleName, entry.url, entry.resourceType));
+      const matchingHistory = state.networkState.history.filter(matches);
+      const matchingCompleted = matchingHistory.find(entry => entry.status === "completed" && entry.statusCode !== undefined && entry.statusCode >= 200 && entry.statusCode < 400);
+      const matchingError = matchingHistory.find(entry => entry.status === "error" || (entry.statusCode ?? 0) >= 400);
+      const matchingActive = state.networkState.activeRequests.find(matches);
 
 			if (matchingCompleted) {
 				return {
@@ -785,21 +794,9 @@
 					label: bundleName,
 					status: "pass",
 					explanation: HELP_COPY.bundles,
-					detail: `Loaded from ${truncate(matchingCompleted.url, 72)} in ${matchingCompleted.loadTimeMs ?? "?"} ms.`,
+					detail: `HTTP ${matchingCompleted.statusCode} · ${matchingCompleted.resourceType} · ${matchingCompleted.url} in ${matchingCompleted.loadTimeMs ?? "?"} ms.`,
 					matchedUrl: matchingCompleted.url,
 					loadTimeMs: matchingCompleted.loadTimeMs,
-				};
-			}
-
-			if (matchingPerformanceEntry) {
-				return {
-					key: `bundle:${bundleName}`,
-					label: bundleName,
-					status: "pass",
-					explanation: HELP_COPY.bundles,
-					detail: `Loaded from ${truncate(matchingPerformanceEntry.name, 72)} in ${Math.round(matchingPerformanceEntry.duration)} ms.`,
-					matchedUrl: matchingPerformanceEntry.name,
-					loadTimeMs: Math.round(matchingPerformanceEntry.duration),
 				};
 			}
 
@@ -813,13 +810,13 @@
 				};
 			}
 
-			if (matchingError && hasTimedOut()) {
+			if (matchingError) {
 				return {
 					key: `bundle:${bundleName}`,
 					label: bundleName,
 					status: "fail",
 					explanation: HELP_COPY.bundles,
-					detail: `A matching request failed for ${truncate(matchingError.url, 72)}.`,
+					detail: `${matchingError.resourceType} · HTTP ${matchingError.statusCode ?? "unavailable"} · ${matchingError.url} · ${matchingError.loadTimeMs ?? "?"} ms · ${matchingError.error ?? "Request failed"}.`,
 					failureMessage: "Bundle request failed before the script finished loading.",
 				};
 			}
@@ -1081,6 +1078,7 @@
 		}
 
 		const signature = JSON.stringify({
+			overrideError,
 			collapsed: state.settings.widgetCollapsed,
 			widgetSide: state.settings.widgetSide,
 			hints: state.rowHints,
@@ -1121,7 +1119,7 @@
 		hideInfoTooltip();
 		widget?.classList.toggle("is-collapsed", state.settings.widgetCollapsed);
 		if (results) {
-			results.innerHTML = sections;
+			results.innerHTML = (overrideError ? `<p role="alert">${escapeHtml(overrideError)}</p>` : "") + sections;
 		}
 		state.root.classList.toggle("is-left", state.settings.widgetSide === "left");
 		state.root.classList.toggle("is-right", state.settings.widgetSide !== "left");
@@ -1605,12 +1603,7 @@
 			return cookieMap;
 		}
 
-		for (const rawPair of rawCookieString.split(";")) {
-			const [name, ...rest] = rawPair.split("=");
-			cookieMap.set(name.trim(), decodeURIComponent(rest.join("=").trim()));
-		}
-
-		return cookieMap;
+		return AdCheckShared.parseCookieString(rawCookieString);
 	}
 
 	function collectAttributeValues(attributeName: string): AdCheckShared.AttributeValueSummary[] {
