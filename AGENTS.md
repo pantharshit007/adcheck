@@ -36,6 +36,8 @@ Use these commands from the repo root:
 
 When making code changes, prefer running `npm run typecheck` and `npm run build` before finishing.
 
+For new changes/feature/bug-fix make sure to bump the package version in package and manifest.json in PR.
+
 ## Working Conventions
 
 - Keep the extension lightweight and framework-free unless explicitly requested otherwise.
