@@ -1,4 +1,4 @@
-# AdCheck
+# AdCheck - Ad Tag QA & Debugging Toolkit
 
 [![Install AdCheck Extension](docs/install-button.svg)](https://ggl.link/adcheck?utm_source=github&utm_medium=readme)
 
