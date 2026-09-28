@@ -1186,9 +1186,9 @@
 		        <div class="adcheck-blocked-routes-master">
 		          <div>
 		            <p class="adcheck-inline-field-label">Enable route blocking</p>
-		            <p class="adcheck-field-help">Blocks subresource requests initiated by this hostname in tabs on this exact hostname. Pausing AdCheck or ignoring the site disables blocking. Save to apply. Regex: /pattern/ is case-sensitive; /pattern/i, bare patterns and URL filters ignore case. Other flags are unsupported.</p>
-                <label>Blocking hostname <input id="blockingHostname" value="${escapeHtml(settings.blockingHostname)}" placeholder="publisher.example" /></label>
-                <button type="button" id="disableAllBlocking">Disable all blocking now</button>
+		            <p class="adcheck-field-help">Blocks subresource requests initiated by this hostname in tabs on this exact hostname. Pausing AdCheck or ignoring the site disables blocking. Save to apply. Plain text is a Chrome URL filter (supports *, | and ^) and ignores case. For a regex, use /pattern/ (case-sensitive), /pattern/i, or regex:pattern (ignores case).</p>
+                <label class="adcheck-inline-field-label">Blocking hostname <input class="adcheck-entry-input" id="blockingHostname" value="${escapeHtml(settings.blockingHostname)}" placeholder="publisher.example" /></label>
+                <button class="adcheck-button adcheck-button-secondary adcheck-button-compact" type="button" id="disableAllBlocking">Disable all blocking now</button>
                 <p id="blockingStatus" role="status"></p>
 		          </div>
 		          <label class="adcheck-toggle adcheck-override-toggle" aria-label="Enable route blocking">
@@ -1216,8 +1216,8 @@
 		    <label class="adcheck-blocked-route-checkbox" aria-label="Enable blocked route">
 		      <input type="checkbox" data-blocked-route-enabled ${entry.enabled ? "checked" : ""} />
 		    </label>
-		    <input class="adcheck-entry-input adcheck-blocked-route-input" type="text" value="${escapeHtml(entry.value)}" placeholder="e.g. /ads\/|tracking" data-blocked-route-value />
-		    <span data-blocked-route-status role="status">Saved; awaiting validation</span>
+		    <input class="adcheck-entry-input adcheck-blocked-route-input" type="text" value="${escapeHtml(entry.value)}" placeholder="e.g. ads.js or /ads\/|tracking/i" data-blocked-route-value />
+		    <span data-blocked-route-status role="status">${entry.value.trim() ? "Checking…" : ""}</span>
             <button class="adcheck-row-remove" type="button" data-blocked-route-remove aria-label="Remove blocked route">×</button>
 		  </div>
 		`;
@@ -1286,12 +1286,15 @@
     try {
       const response = await chrome.runtime.sendMessage({type: "SYNC_BLOCKED_ROUTE_RULES"}) as {installedCount?: number; statuses?: {value: string; state: string; message: string}[]};
       const summary = document.getElementById("blockingStatus");
-      if (summary) summary.textContent = `${response.installedCount ?? 0} rules installed in Chrome.`;
+      const installed = response.installedCount ?? 0;
+      if (summary) summary.textContent = `${installed} ${installed === 1 ? "rule" : "rules"} active in Chrome.`;
+      const labels: Record<string, string> = {installed: "Active", saved: "Saved", disabled: "Off", invalid: "Invalid", "omitted-due-to-limit": "Skipped"};
       for (const row of Array.from(document.querySelectorAll<HTMLElement>("[data-blocked-route-row]"))) {
-        const value = row.querySelector<HTMLInputElement>("[data-blocked-route-value]")?.value;
+        const value = row.querySelector<HTMLInputElement>("[data-blocked-route-value]")?.value.trim();
         const status = response.statuses?.find(item => item.value === value);
         const label = row.querySelector<HTMLElement>("[data-blocked-route-status]");
-        if (label && status) label.textContent = `${status.state}: ${status.message}`;
+        if (label && status) { label.textContent = `${labels[status.state] ?? status.state}: ${status.message}`; label.dataset.state = status.state; }
+        else if (label && !value) label.textContent = "";
       }
     } catch { const summary = document.getElementById("blockingStatus"); if (summary) summary.textContent = "Could not verify installed blocking rules."; }
   }

@@ -658,13 +658,18 @@
 		};
 	}
 
+	let userScriptsAvailable = false;
 	async function buildWindowGlobalResults(snapshot: PageCheckSnapshot): Promise<WindowGlobalCheckResult[]> {
 		const entries = state.settings.windowGlobals;
 		if (entries.length === 0) {
 			return [];
 		}
 
-    const capability = await sendMessage<{status?: AdCheckShared.UserScriptStatus}>({type: "GET_USER_SCRIPT_STATUS"});
+    // Access can only be granted by reloading the extension, which also replaces this
+    // content script, so a positive answer is safe to cache for the page's lifetime.
+    const capability = userScriptsAvailable ? {status: {available: true} as AdCheckShared.UserScriptStatus}
+      : await sendMessage<{status?: AdCheckShared.UserScriptStatus}>({type: "GET_USER_SCRIPT_STATUS"});
+    if (capability?.status?.available) userScriptsAvailable = true;
     if (!capability?.status?.available) return entries.map(entry => ({
       key: `windowGlobal:${entry.path}`, label: entry.path, status: "fail",
       explanation: HELP_COPY.windowGlobals, detail: capability?.status?.message || "Window global inspection needs Allow User Scripts in Chrome extension details. Reload AdCheck after enabling it.",
@@ -780,13 +785,22 @@
 	}
 
 	function buildBundleResults(): BundleCheckResult[] {
+    const performanceEntries = typeof performance !== "undefined" && typeof performance.getEntriesByType === "function"
+      ? performance.getEntriesByType("resource") as PerformanceResourceTiming[]
+      : [];
     return state.settings.bundles.map((bundleName) => {
+      // Always re-match live: recorded matchedChecks reflect the bundle list at request
+      // time (and include query-aware url: matches), but edited names must still match.
       const matches = (entry: AdCheckShared.ActiveNetworkRequest) => entry.resourceType === "script" &&
-        (entry.matchedChecks?.includes(bundleName) ?? AdCheckShared.matchesBundle(bundleName, entry.url, entry.resourceType));
+        (entry.matchedChecks?.includes(bundleName) || AdCheckShared.matchesBundle(bundleName, entry.url, entry.resourceType));
       const matchingHistory = state.networkState.history.filter(matches);
       const matchingCompleted = matchingHistory.find(entry => entry.status === "completed" && entry.statusCode !== undefined && entry.statusCode >= 200 && entry.statusCode < 400);
       const matchingError = matchingHistory.find(entry => entry.status === "error" || (entry.statusCode ?? 0) >= 400);
       const matchingActive = state.networkState.activeRequests.find(matches);
+      // Scripts the page loaded before AdCheck started tracking this tab (for example
+      // after an extension reload) are only visible through Resource Timing.
+      const matchingPerformance = matchingHistory.length || matchingActive ? undefined : performanceEntries.find(entry =>
+        entry.initiatorType === "script" && AdCheckShared.matchesBundle(bundleName, entry.name, "script"));
 
 			if (matchingCompleted) {
 				return {
@@ -794,7 +808,7 @@
 					label: bundleName,
 					status: "pass",
 					explanation: HELP_COPY.bundles,
-					detail: `HTTP ${matchingCompleted.statusCode} · ${matchingCompleted.resourceType} · ${matchingCompleted.url} in ${matchingCompleted.loadTimeMs ?? "?"} ms.`,
+					detail: `Loaded in ${matchingCompleted.loadTimeMs ?? "?"} ms (HTTP ${matchingCompleted.statusCode}) from ${truncate(matchingCompleted.url, 72)}.`,
 					matchedUrl: matchingCompleted.url,
 					loadTimeMs: matchingCompleted.loadTimeMs,
 				};
@@ -816,8 +830,33 @@
 					label: bundleName,
 					status: "fail",
 					explanation: HELP_COPY.bundles,
-					detail: `${matchingError.resourceType} · HTTP ${matchingError.statusCode ?? "unavailable"} · ${matchingError.url} · ${matchingError.loadTimeMs ?? "?"} ms · ${matchingError.error ?? "Request failed"}.`,
+					detail: `Request failed${matchingError.statusCode ? ` with HTTP ${matchingError.statusCode}` : ""}${matchingError.error ? ` (${matchingError.error})` : ""} after ${matchingError.loadTimeMs ?? "?"} ms: ${truncate(matchingError.url, 72)}.`,
 					failureMessage: "Bundle request failed before the script finished loading.",
+				};
+			}
+
+			if (matchingPerformance) {
+				const statusCode = matchingPerformance.responseStatus ?? 0;
+				const url = AdCheckShared.redactRequestUrl(matchingPerformance.name) || matchingPerformance.name;
+				const loadTimeMs = Math.round(matchingPerformance.duration);
+				if (statusCode >= 400) {
+					return {
+						key: `bundle:${bundleName}`,
+						label: bundleName,
+						status: "fail",
+						explanation: HELP_COPY.bundles,
+						detail: `Request failed with HTTP ${statusCode} after ${loadTimeMs} ms: ${truncate(url, 72)}.`,
+						failureMessage: "Bundle request failed before the script finished loading.",
+					};
+				}
+				return {
+					key: `bundle:${bundleName}`,
+					label: bundleName,
+					status: "pass",
+					explanation: HELP_COPY.bundles,
+					detail: `Loaded in ${loadTimeMs} ms${statusCode ? ` (HTTP ${statusCode})` : ""} from ${truncate(url, 72)}. Found in the page's own resource list; reload the page for full request details.`,
+					matchedUrl: url,
+					loadTimeMs,
 				};
 			}
 

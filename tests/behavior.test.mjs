@@ -13,7 +13,7 @@ function fixture(kind = 'background') {
   const listeners = {};
   const event = name => ({addListener(fn) {listeners[name] = fn;}});
   let rules = [], dynamic = [], writes = 0, notifications = 0;
-  const timers = new Map(); let timerId = 0;
+  const timers = new Map(); let timerId = 0; const microtasks = [];
   const chrome = {
     runtime: {onInstalled: event('installed'), onMessage: event('message')},
     storage: {onChanged: event('settings'), sync: {get: async () => ({}), set: async () => {}}, session: {get: async () => ({}), set: async () => {writes++;}, remove: async () => {}}},
@@ -28,13 +28,13 @@ function fixture(kind = 'background') {
     }
   };
   const warnings = [];
-  const context = vm.createContext({chrome, console: {...console, warn: (...args) => warnings.push(args)}, URL, queueMicrotask() {}, navigator: {userAgent: 'Chrome/140'}, self: {importScripts() {}}, setTimeout(fn) {timers.set(++timerId, fn); return timerId;}, clearTimeout(id) {timers.delete(id);}, window: {__ADCHECK_BOOTSTRAPPED__: true, location: {hostname: 'publisher.test'}}, document: {cookie: '', getElementById: () => null, querySelector: selector => {if(selector === '[') throw Error('Invalid selector');return null;}}});
+  const context = vm.createContext({chrome, console: {...console, warn: (...args) => warnings.push(args)}, URL, queueMicrotask(fn) {microtasks.push(fn);}, navigator: {userAgent: 'Chrome/140'}, self: {importScripts() {}}, setTimeout(fn) {timers.set(++timerId, fn); return timerId;}, clearTimeout(id) {timers.delete(id);}, window: {__ADCHECK_BOOTSTRAPPED__: true, location: {hostname: 'publisher.test'}}, document: {cookie: '', getElementById: () => null, querySelector: selector => {if(selector === '[') throw Error('Invalid selector');return null;}}});
   evaluate(context, 'src/shared/defaults.ts');
-  if (kind === 'background') evaluate(context, 'src/background.ts', 'settingsCache, getTabState, pendingRequests, syncBlockedRouteRules, ensureSettings, unready: () => {trackingReady = false;}, ready: () => {trackingReady = true; for (const event of earlyEvents.splice(0)) event();}, getStatus: () => blockingStatus');
+  if (kind === 'background') evaluate(context, 'src/background.ts', 'settingsCache, getTabState, pendingRequests, syncBlockedRouteRules, ensureSettings, unready: () => {trackingReady = false;}, ready: () => {trackingReady = true; for (const event of earlyEvents.splice(0)) event();}, getStatus: () => blockingStatus, earlyEventCount: () => earlyEvents.length');
   else if (kind === 'popup') evaluate(context, 'src/popup.ts', 'parseBackup');
   else evaluate(context, 'src/content.ts', 'state, buildBundleResults, buildWindowGlobalResults, runChecks, applySettings, executeOverrideScriptsInOrder, teardownSiteOverride, tryApplySiteOverride');
   if (kind === "background") context.api.ready();
-  return {context, chrome, warnings, listeners, api: context.api, shared: context.AdCheckShared, timers, rules: () => rules, writes: () => writes, notifications: () => notifications};
+  return {context, chrome, warnings, listeners, microtasks, api: context.api, shared: context.AdCheckShared, timers, rules: () => rules, writes: () => writes, notifications: () => notifications};
 }
 const request = (id, extra = {}) => ({tabId: 1, requestId: String(id), type: 'script', url: 'https://cdn.test/script.js?secret=123', timeStamp: 100, ...extra});
 
@@ -65,20 +65,55 @@ test('reload generations discard late completions, redirects retain timing, tab 
   f.listeners.completed(request('pending')); assert.equal(f.api.getTabState(1).history.length, 0);
 });
 
-test('paused, unrelated, and empty configurations retain no requests', () => {
+test('paused, non-script, and empty configurations retain no requests', () => {
   const f = fixture(); f.listeners.before(request(1)); assert.equal(f.api.pendingRequests.size, 0);
   f.api.settingsCache.current.enabled = true;
   f.listeners.before(request(2, {type: 'image'}));
-  f.listeners.before(request(3, {url: 'https://test/other.js?q=script.js'}));
   f.api.settingsCache.current.bundles = []; f.listeners.before(request(4));
   assert.equal(f.api.pendingRequests.size, 0); assert.equal(f.writes(), 0);
+});
+
+test('unmatched scripts are retained so renamed bundles match without a reload', async () => {
+  const f = fixture(); f.api.settingsCache.current.enabled = true;
+  f.listeners.before(request(1, {url: 'https://cdn.test/apinstreambundle.js?v=2'}));
+  f.listeners.completed(request(1, {url: 'https://cdn.test/apinstreambundle.js?v=2', statusCode: 200}));
+  const [entry] = f.api.getTabState(1).history;
+  assert.deepEqual([...entry.matchedChecks], []);
+  // Unmatched scripts are persisted but do not wake the widget.
+  for (const timer of f.timers.values()) timer(); f.timers.clear(); await flush();
+  assert.equal(f.notifications(), 0);
+  // Renaming the bundle keeps the history.
+  f.listeners.settings({'adcheck-settings': {newValue: {...f.api.settingsCache.current, bundles: ['apinstreambundle']}}}, 'sync');
+  assert.equal(f.api.getTabState(1).history.length, 1);
+  const c = fixture('content');
+  c.api.state.settings.bundles = ['apinstreambundle'];
+  c.api.state.networkState.history = [{...entry}];
+  assert.equal(c.api.buildBundleResults()[0].status, 'pass');
+});
+
+test('history eviction keeps matched bundle entries', () => {
+  const f = fixture(); f.api.settingsCache.current.enabled = true;
+  f.listeners.before(request('bundle')); f.listeners.completed(request('bundle', {statusCode: 200}));
+  for (let i = 0; i < f.shared.MAX_NETWORK_HISTORY + 5; i++) {
+    const url = `https://cdn.test/other-${i}.js`;
+    f.listeners.before(request(i, {url})); f.listeners.completed(request(i, {url, statusCode: 200}));
+  }
+  const history = f.api.getTabState(1).history;
+  assert.equal(history.length, f.shared.MAX_NETWORK_HISTORY);
+  assert.equal(history[0].requestId, 'bundle');
 });
 
 test('bundle matching modes and malformed cookies', () => {
   const {shared} = fixture();
   assert.equal(shared.matchesBundle('script.js', 'https://test/other?script.js', 'script'), false);
   assert.equal(shared.matchesBundle('script.js', 'https://test/script.js?v=1', 'xmlhttprequest'), false);
+  assert.equal(shared.matchesBundle('apinstreambundle', 'https://cdn.test/js/apInstreamBundle.js', 'script'), true);
+  assert.equal(shared.matchesBundle('prebid', 'https://cdn.test/prebid.min.js', 'script'), true);
+  assert.equal(shared.matchesBundle('cdn.test/tag/gpt', 'https://cdn.test/tag/gpt.js', 'script'), true);
+  assert.equal(shared.matchesBundle('filename:gpt.js', 'https://cdn.test/mygpt.js', 'script'), false);
+  assert.equal(shared.matchesBundle('filename:gpt.js', 'https://cdn.test/GPT.js', 'script'), true);
   assert.equal(shared.matchesBundle('url:other', 'https://test/other', 'script'), true);
+  assert.equal(shared.matchesBundle('url:v=1', 'https://test/a.js?v=1', 'script'), true);
   assert.equal(shared.matchesBundle('regex:script\\.js$', 'https://test/script.js', 'script'), true);
   assert.deepEqual(Array.from(shared.parseCookieString('empty=; eq=a=b; encoded=a%3Bb%3Dc; bad=%ZZ; good=yes'), pair => Array.from(pair)), [['empty',''], ['eq','a=b'], ['encoded','a;b=c'], ['bad','%ZZ'], ['good','yes']]);
 });
@@ -102,6 +137,29 @@ test('DNR rejects unsupported regex and flags while retaining valid rules; scope
   f.api.settingsCache.current.ignoredDomains = ['publisher.test']; await f.api.syncBlockedRouteRules(); assert.equal(f.rules().length, 0);
   f.api.settingsCache.current.ignoredDomains = []; f.api.settingsCache.current.enabled = false;
   await f.api.syncBlockedRouteRules(); assert.equal(f.rules().length, 0);
+});
+
+test('blocked routes use regex only when explicit and keep URL-filter syntax', async () => {
+  const f = fixture(); Object.assign(f.api.settingsCache.current, {enabled: true, blockingHostname: 'publisher.test', blockedRoutes: [
+    {value: '/ads\\/|tracking/i', enabled: true}, {value: '||ads.example.com^', enabled: true}, {value: 'regex:track(ing)?', enabled: true}, {value: '/ads\\/|tracking', enabled: true}
+  ]});
+  await f.api.syncBlockedRouteRules();
+  const [slash, filter, prefixed, notRegex] = f.rules().map(rule => rule.condition);
+  assert.equal(slash.regexFilter, 'ads\\/|tracking'); assert.equal(slash.isUrlFilterCaseSensitive, false);
+  assert.equal(filter.urlFilter, '||ads.example.com^'); assert.equal(filter.regexFilter, undefined);
+  assert.equal(prefixed.regexFilter, 'track(ing)?');
+  assert.equal(notRegex.urlFilter, '/ads\\/|tracking');
+  assert.equal(f.api.getStatus().every(status => status.state === 'installed'), true);
+});
+
+test('failed settings initialization still drains a bounded early-event queue', async () => {
+  const f = fixture(); f.api.unready(); f.api.settingsCache.current.enabled = true;
+  for (let i = 0; i < 1500; i++) f.listeners.before(request(i));
+  f.chrome.storage.sync.get = async () => { throw Error('sync unavailable'); };
+  assert.equal(f.api.earlyEventCount(), 1000);
+  f.microtasks[0](); await flush();
+  assert.equal(f.api.earlyEventCount(), 0); assert.equal(f.api.pendingRequests.size, 1000);
+  f.listeners.before(request('after')); assert.equal(f.api.pendingRequests.size, 1001);
 });
 
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };

@@ -18,8 +18,10 @@ loading and DNR enforcement have not been exercised in the collaborative browser
 - Network updates use a synchronous reducer, navigation-scoped pending requests,
   and ordered, batched session persistence. URLs are redacted after matching.
 - Bundle checks require script resources and successful HTTP responses. Bare names
-  match filenames; `url:` and `regex:` select explicit alternatives. Existing
-  substring configurations may need a `url:` prefix.
+  match case-insensitively anywhere in the script's host and path (never the query);
+  `filename:`, `url:` and `regex:` select explicit alternatives. All script requests
+  are retained (bounded, redacted) so edited bundle names re-evaluate without a
+  reload; Resource Timing covers scripts loaded before tracking began.
 - Overrides track inserted nodes, replace reversible markup, cancel remaining
   script steps, and show selector errors. Executed script effects require reload.
 - Blocking now requires a selected hostname and uses session rules scoped to

@@ -1749,5 +1749,10 @@
 }
 
 [data-blocked-route-status] { grid-column: 2; grid-row: 2; font-size: 12px; overflow-wrap: anywhere; }
+[data-blocked-route-status][data-state="invalid"] { color: #b42318; }
+[data-blocked-route-status][data-state="installed"] { color: #067647; }
+.adcheck-blocked-routes-master label.adcheck-inline-field-label { display: grid; gap: 4px; margin: 8px 0; }
+#disableAllBlocking { margin-bottom: 4px; }
+#blockingStatus { font-size: 12px; margin: 4px 0 0; }
 [data-blocked-route-remove] { grid-column: 3; grid-row: 1; }
 #globalPermissionWarning:not(:empty), #importPreview:not(:empty) { padding: 10px; background: #fff3cd; color: #533f03; overflow-wrap: anywhere; }

@@ -29,7 +29,7 @@ namespace AdCheckShared {
 		{
 			key: "bundles",
 			title: "Bundle or script names",
-			description: "Script resources only. Use a filename, url:substring, or regex:pattern (case-sensitive).",
+			description: "Scripts that should load on the page. A name such as prebid or gpt.js matches any script whose address contains it. Advanced: filename:exact.js, url:text (includes query), or regex:pattern.",
 			placeholder: "e.g. adscript.js",
 		},
 		{
@@ -357,12 +357,20 @@ namespace AdCheckShared {
 
 		return entries;
 	}
+  // Bare names keep the original, forgiving behaviour: a case-insensitive match
+  // anywhere in the host and path (for example "apinstreambundle" matches
+  // ".../apinstreambundle.js"). Query strings and fragments are ignored so a
+  // parameter such as "?lib=gpt.js" cannot satisfy a check.
   export function matchesBundle(pattern: string, url: string, resourceType: string): boolean {
     if (resourceType !== "script") return false;
     try {
       if (pattern.startsWith("regex:")) return new RegExp(pattern.slice(6)).test(url);
-      if (pattern.startsWith("url:")) return url.includes(pattern.slice(4));
-      return new URL(url).pathname.split("/").pop()?.toLowerCase() === pattern.replace(/^filename:/, "").toLowerCase();
+      if (pattern.startsWith("url:")) return url.toLowerCase().includes(pattern.slice(4).toLowerCase());
+      const parsed = new URL(url);
+      if (pattern.startsWith("filename:")) {
+        return parsed.pathname.split("/").pop()?.toLowerCase() === pattern.slice(9).toLowerCase();
+      }
+      return `${parsed.host}${parsed.pathname}`.toLowerCase().includes(pattern.toLowerCase());
     } catch { return false; }
   }
 

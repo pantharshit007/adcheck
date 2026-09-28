@@ -44,11 +44,24 @@
   let trackingReady = false;
   let settingsRevision = 0;
   const earlyEvents: (() => void)[] = [];
+  // Bound the startup queue so a failing settings load cannot grow memory without limit.
+  const MAX_EARLY_EVENTS = 1000;
   function whenTrackingReady(event: () => void): void {
-    if (trackingReady) event(); else earlyEvents.push(event);
+    if (trackingReady) event();
+    else if (earlyEvents.length < MAX_EARLY_EVENTS) earlyEvents.push(event);
   }
 
-  queueMicrotask(() => { void initialize().catch(console.warn); });
+  function markTrackingReady(): void {
+    trackingReady = true;
+    for (const event of earlyEvents.splice(0)) event();
+  }
+
+  queueMicrotask(() => {
+    void initialize().catch((error: unknown) => {
+      console.warn("AdCheck initialization failed; continuing with cached settings:", error);
+      markTrackingReady();
+    });
+  });
 
   chrome.runtime.onInstalled.addListener(() => {
     void ensureSettings();
@@ -64,7 +77,10 @@
 			settingsRevision++;
       const previous = settingsCache.current;
       settingsCache.current = AdCheckShared.mergeSettings(nextValue);
-      if (previous.enabled !== settingsCache.current.enabled || JSON.stringify(previous.bundles) !== JSON.stringify(settingsCache.current.bundles) || JSON.stringify(previous.ignoredDomains) !== JSON.stringify(settingsCache.current.ignoredDomains)) {
+      // Editing bundle names keeps history so the widget can re-evaluate the
+      // already-loaded page immediately; only tracking on/off changes clear it.
+      const next = settingsCache.current;
+      if (previous.enabled !== next.enabled || (previous.bundles.length > 0) !== (next.bundles.length > 0) || JSON.stringify(previous.ignoredDomains) !== JSON.stringify(next.ignoredDomains)) {
         for (const tabId of tabStateCache.keys()) clearTabTracking(tabId, false);
       }
 			void syncBlockedRouteRules();
@@ -76,8 +92,9 @@
     void syncActionIcons();
   });
 
-  chrome.tabs.onUpdated.addListener(() => {
-    void syncBlockedRouteRules();
+  chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
+    // Title, favicon, and loading-state updates cannot change blocking scope.
+    if (changeInfo.url) void syncBlockedRouteRules();
     void syncActionIcons();
   });
 
@@ -163,17 +180,18 @@
           } else { await chrome.storage.session.remove(key); }
         }
       } catch (error) { console.warn("AdCheck request history could not be restored:", error); }
-      const openTabs = await chrome.tabs.query({});
-      for (const tab of openTabs) {
-        try { if (typeof tab.id === "number") tabHosts.set(tab.id, new URL(tab.url ?? "").hostname); } catch { /* Non-web tab. */ }
-      }
+      try {
+        const openTabs = await chrome.tabs.query({});
+        for (const tab of openTabs) {
+          try { if (typeof tab.id === "number") tabHosts.set(tab.id, new URL(tab.url ?? "").hostname); } catch { /* Non-web tab. */ }
+        }
+      } catch (error) { console.warn("AdCheck could not read open tabs:", error); }
     }
     for (const tabId of tabStateCache.keys()) {
       if (!tabHosts.has(tabId)) clearTabTracking(tabId);
       else if (!settingsCache.current.enabled || !settingsCache.current.bundles.length || settingsCache.current.ignoredDomains.some(entry => AdCheckShared.matchesIgnoredDomain(entry, tabHosts.get(tabId)!))) clearTabTracking(tabId, false);
     }
-    trackingReady = true;
-    for (const event of earlyEvents.splice(0)) event();
+    markTrackingReady();
 		return settingsCache.current;
 	}
 
@@ -326,7 +344,6 @@
         return hostname === settings.blockingHostname && !settings.ignoredDomains.some(entry => AdCheckShared.matchesIgnoredDomain(entry, hostname));
       } catch { return false; }
     }).flatMap(tab => typeof tab.id === "number" ? [tab.id] : []);
-    const active = settings.enabled && settings.blockedRoutesEnabled && !!settings.blockingHostname;
     const existing = await dnr.getSessionRules();
     const legacy = await dnr.getDynamicRules();
     // Remove older browser-wide rules even when paused.
@@ -334,18 +351,23 @@
     const rules: chrome.declarativeNetRequest.Rule[] = [];
     const statuses: typeof blockingStatus = [];
     let regexCount = 0;
+    const inactiveReason = !settings.enabled ? "AdCheck is paused."
+      : !settings.blockedRoutesEnabled ? "Route blocking is turned off."
+      : !settings.blockingHostname ? "Enter a blocking hostname to activate this rule." : "";
     for (const entry of settings.blockedRoutes) {
-      const status = {value: entry.value, state: "saved", message: "No eligible open tabs on the selected site."};
+      const status = {value: entry.value, state: "saved", message: `Waiting: open ${settings.blockingHostname} in a tab to activate.`};
       statuses.push(status);
-      if (!active || !entry.enabled) { status.state = "disabled"; status.message = "Paused, disabled, or no site selected."; continue; }
+      if (inactiveReason || !entry.enabled) { status.state = "disabled"; status.message = inactiveReason || "This rule is unchecked."; continue; }
       const value = entry.value.trim();
       const condition: chrome.declarativeNetRequest.RuleCondition = {tabIds, initiatorDomains: [settings.blockingHostname], excludedResourceTypes: ["main_frame"]};
-      const slash = value.startsWith("/") && value.lastIndexOf("/") > 0;
-      const regex = slash || value.startsWith("regex:") || AdCheckShared.looksLikeRegexPattern(value);
+      // Regex only when explicit: /pattern/, /pattern/i, or regex:pattern. Everything
+      // else is a DNR urlFilter, so filter syntax such as ||host^ keeps its meaning.
+      const slashMatch = value.match(/^\/(.+)\/([a-z]*)$/);
+      const regex = slashMatch !== null || value.startsWith("regex:");
       if (regex) {
-        const flags = slash ? value.slice(value.lastIndexOf("/") + 1) : "i";
+        const flags = slashMatch ? slashMatch[2] : "i";
         if (!/^(i)?$/.test(flags)) { status.state = "invalid"; status.message = "Only the i flag is supported."; continue; }
-        const source = slash ? value.slice(1, value.lastIndexOf("/")) : value.replace(/^regex:/, "");
+        const source = slashMatch ? slashMatch[1] : value.slice("regex:".length);
         let support: chrome.declarativeNetRequest.IsRegexSupportedResult;
         try { support = await dnr.isRegexSupported({regex: source, isCaseSensitive: flags !== "i"}); }
         catch (error) { status.state = "invalid"; status.message = `Chrome could not validate this regex: ${String(error)}`; continue; }
@@ -359,7 +381,10 @@
       if (!tabIds.length) continue;
       if (regex) regexCount++;
       rules.push({id: BLOCKED_ROUTE_RULE_ID_BASE + rules.length, action: {type: "block"}, condition});
-      status.state = "installed"; status.message = "Installed for eligible tabs on the selected site.";
+      status.state = "installed";
+      status.message = !regex && /[()[\]{}+$\\]/.test(value)
+        ? "Active as a URL filter. To use it as a regex, write /pattern/i or regex:pattern."
+        : `Active on ${settings.blockingHostname}.`;
     }
     try {
       await dnr.updateSessionRules({removeRuleIds: existing.filter(rule => rule.id >= BLOCKED_ROUTE_RULE_ID_BASE).map(rule => rule.id), addRules: rules});
@@ -585,6 +610,7 @@
     if (clearNavigation) { navigationRequests.delete(tabId); tabHosts.delete(tabId); }
     clearTimeout(notificationTimers.get(tabId));
     notificationTimers.delete(tabId);
+    notifyPending.delete(tabId);
     for (const [key, request] of pendingRequests) {
       if (request.tabId === tabId) pendingRequests.delete(key);
     }
@@ -603,10 +629,15 @@
     void next.then(() => { if (storageQueues.get(tabId) === next) storageQueues.delete(tabId); });
   }
 
-  function scheduleNotification(tabId: number): void {
+  const notifyPending = new Set<number>();
+  function scheduleNotification(tabId: number, matched: boolean): void {
+    // Unmatched scripts are retained (so renamed checks can match them later)
+    // but do not wake the widget, since they cannot change current results.
+    if (matched) notifyPending.add(tabId);
     if (notificationTimers.has(tabId)) return;
     notificationTimers.set(tabId, setTimeout(() => {
       notificationTimers.delete(tabId);
+      const notify = notifyPending.delete(tabId);
       if (!trackingEnabled(tabId)) return;
       const state = tabStateCache.get(tabId);
       if (state) {
@@ -616,26 +647,34 @@
           await chrome.storage.session.set({[AdCheckShared.tabStateStorageKey(tabId)]: {version: 1, state: snapshot}});
         });
       }
-      void notifyTab(tabId);
+      if (notify) void notifyTab(tabId);
     }, 100));
   }
 
   function handleBeforeRequest(details: WebRequestLike): void {
     if (details.tabId < 0) return;
     if (details.type === "main_frame") {
+      const previousHost = tabHosts.get(details.tabId);
       if (navigationRequests.get(details.tabId) !== details.requestId) {
         clearTabTracking(details.tabId);
         navigationRequests.set(details.tabId, details.requestId);
         void updateActionBadge(details.tabId, false).catch(() => {});
       }
-      tabHosts.set(details.tabId, new URL(details.url).hostname);
+      let hostname = "";
+      try { hostname = new URL(details.url).hostname; } catch { /* Keep empty. */ }
+      tabHosts.set(details.tabId, hostname);
+      // Install tab-scoped blocking before the new document starts requesting
+      // subresources, rather than waiting for tabs.onUpdated.
+      const blockingHost = settingsCache.current.blockingHostname;
+      if (blockingHost && previousHost !== hostname && (hostname === blockingHost || previousHost === blockingHost)) void syncBlockedRouteRules();
       return;
     }
-    if (!trackingEnabled(details.tabId)) return;
+    // Retain every script (redacted and bounded) so the widget can re-match
+    // history when bundle names are edited on an already-loaded page.
+    if (details.type !== "script" || !trackingEnabled(details.tabId)) return;
     const matchedChecks = settingsCache.current.bundles.filter(pattern => AdCheckShared.matchesBundle(pattern, details.url, details.type));
     const key = requestKey(details.tabId, details.requestId);
     const previous = pendingRequests.get(key);
-    if (!matchedChecks.length && !previous) return;
     const request: PendingRequest = {
       tabId: details.tabId, requestId: details.requestId, resourceType: details.type,
       startedAt: previous?.startedAt ?? details.timeStamp,
@@ -646,7 +685,7 @@
     const state = getTabState(details.tabId);
     state.activeRequests = state.activeRequests.filter(item => item.requestId !== request.requestId).concat(request);
     state.lastUpdatedAt = Date.now();
-    scheduleNotification(details.tabId);
+    scheduleNotification(details.tabId, request.matchedChecks!.length > 0);
   }
 
   function finalizeRequest(details: WebRequestLike, status: "completed" | "error"): void {
@@ -656,14 +695,25 @@
     pendingRequests.delete(key);
     const state = getTabState(details.tabId);
     state.activeRequests = state.activeRequests.filter(item => item.requestId !== details.requestId);
+    // Re-match with the full URL in case bundle names changed mid-request.
+    const matchedChecks = [...new Set([...(pending.matchedChecks ?? []), ...settingsCache.current.bundles.filter(pattern => AdCheckShared.matchesBundle(pattern, details.url, pending.resourceType))])];
     state.history.push({
       ...pending, url: AdCheckShared.redactRequestUrl(details.url), completedAt: details.timeStamp,
       loadTimeMs: Math.max(0, Math.round(details.timeStamp - pending.startedAt)),
-      status, statusCode: details.statusCode, error: details.error
+      status, statusCode: details.statusCode, error: details.error, matchedChecks
     });
-    state.history = state.history.slice(-AdCheckShared.MAX_NETWORK_HISTORY);
+    trimHistory(state);
     state.lastUpdatedAt = Date.now();
-    scheduleNotification(details.tabId);
+    scheduleNotification(details.tabId, matchedChecks.length > 0);
+  }
+
+  // Evict the oldest unmatched scripts first so configured bundles, which often
+  // load early, are not pushed out by later third-party scripts.
+  function trimHistory(state: NetworkTabState): void {
+    while (state.history.length > AdCheckShared.MAX_NETWORK_HISTORY) {
+      const index = state.history.findIndex(entry => !entry.matchedChecks?.length);
+      state.history.splice(index >= 0 ? index : 0, 1);
+    }
   }
 
   function getTabState(tabId: number): NetworkTabState {

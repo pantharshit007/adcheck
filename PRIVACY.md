@@ -13,8 +13,10 @@ It inspects pages to perform the checks you configure.
 - **Local extension storage:** hostname-specific selectors and override snippets
   remain until deleted, replaced by an import, or the extension is uninstalled.
   Picker selections also stay locally until cleared. They are not in backups.
-- **Session storage and worker memory:** up to 200 completed matching script
-  requests per tab plus matching requests still in flight. History clears on
+- **Session storage and worker memory:** up to 200 completed script requests per
+  tab (scripts matching your checks are kept first) plus script requests still in
+  flight, while at least one bundle check is configured. Non-script requests are
+  never retained. History clears on
   navigation, tab closure, tracking-setting changes, or the end of Chrome's session
   (including extension reload). Session storage preserves it across service-worker
   suspension. Writes and page notifications are batched at most once per 100 ms
@@ -43,7 +45,7 @@ script effects require reloading the page.
 ## Permissions
 
 - `storage`: save synced settings and local overrides, and retain temporary redacted request history.
-- `webRequest`: observe matching script starts, responses, and failures.
+- `webRequest`: observe script starts, responses, and failures.
 - `userScripts`: execute configured override scripts and inspect window globals in
   the page context, with Chrome's user-script access enabled.
 - `declarativeNetRequest`: install site-scoped blocking rules. Only subresources in
