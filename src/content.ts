@@ -671,7 +671,7 @@
       : await sendMessage<{status?: AdCheckShared.UserScriptStatus}>({type: "GET_USER_SCRIPT_STATUS"});
     if (capability?.status?.available) userScriptsAvailable = true;
     if (!capability?.status?.available) return entries.map(entry => ({
-      key: `windowGlobal:${entry.path}`, label: entry.path, status: "fail",
+      key: `windowGlobal:${entry.path}`, label: entry.label || entry.path, status: "fail",
       explanation: HELP_COPY.windowGlobals, detail: capability?.status?.message || "Window global inspection needs Allow User Scripts in Chrome extension details. Reload AdCheck after enabling it.",
       path: entry.path, rawValue: "", valueType: "error", isLargeObject: false
     }));
@@ -692,7 +692,7 @@
 				if (!bundlePassed) {
 					results.push({
 						key: `windowGlobal:${entry.path}`,
-						label: entry.path,
+						label: entry.label || entry.path,
 						status: "pending",
 						explanation: HELP_COPY.windowGlobals,
 						detail: `Waiting for bundle "${entry.awaitBundle}" to load before reading this value.`,
@@ -730,7 +730,7 @@
 				if (!read || read.error) {
 					results[entryIndex] = {
 						key: `windowGlobal:${entry.path}`,
-						label: entry.path,
+						label: entry.label || entry.path,
 						status: hasTimedOut() ? "fail" : "pending",
 						explanation: HELP_COPY.windowGlobals,
 						detail: read?.error ?? "Could not read this window property.",
@@ -748,7 +748,7 @@
 				if (read.type === "undefined" || read.type === "null") {
 					results[entryIndex] = {
 						key: `windowGlobal:${entry.path}`,
-						label: entry.path,
+						label: entry.label || entry.path,
 						status: hasTimedOut() ? "fail" : "pending",
 						explanation: HELP_COPY.windowGlobals,
 						detail: hasTimedOut()
@@ -768,7 +768,7 @@
 				const isLarge = read.value.length > 120;
 				results[entryIndex] = {
 					key: `windowGlobal:${entry.path}`,
-					label: entry.path,
+					label: entry.label || entry.path,
 					status: "pass",
 					explanation: HELP_COPY.windowGlobals,
 					detail: read.value,
@@ -1302,7 +1302,7 @@
             <div class="adcheck-status-icon is-${result.status}">${statusIcon}</div>
             <div class="adcheck-result-body">
               <div class="adcheck-result-label-row">
-                <span class="adcheck-result-label">${escapeHtml(result.label)}</span>
+                <span class="adcheck-result-label" title="${escapeAttribute(result.path)}">${escapeHtml(result.label)}</span>
                 <span class="adcheck-result-pill is-${result.status}">${escapeHtml(result.status)}</span>
                 ${typeBadge}
                 <button class="adcheck-info-btn" type="button" aria-label="What does this check?">
@@ -1310,6 +1310,7 @@
                   <span class="adcheck-info-tooltip">${escapeHtml(result.explanation)}</span>
                 </button>
               </div>
+              ${result.label !== result.path ? `<p class="adcheck-result-path">${escapeHtml(result.path)}</p>` : ""}
               ${detailText}
               ${valueBlock}
               ${hint ? `<p class="adcheck-result-detail is-failure">${escapeHtml(hint)}</p>` : ""}

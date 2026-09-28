@@ -153,6 +153,16 @@
 		});
 
 		importExportInput.addEventListener("input", previewBackup);
+		const importModeSelect = document.getElementById("importConflictMode") as HTMLSelectElement | null;
+		const importModeHelp = document.getElementById("importModeHelp");
+		const importModeCopy: Record<string, string> = {
+			merge: "Imported site overrides replace yours for the same website; others are kept.",
+			skip: "Your existing site overrides are kept; only new websites are added.",
+			replace: "All your current site overrides are removed and replaced by the imported ones.",
+		};
+		const renderImportModeHelp = () => { if (importModeHelp && importModeSelect) importModeHelp.textContent = importModeCopy[importModeSelect.value] ?? ""; };
+		importModeSelect?.addEventListener("change", renderImportModeHelp);
+		renderImportModeHelp();
 		importFileButton.addEventListener("click", () => {
 			importFileInput.click();
 		});
@@ -351,31 +361,35 @@
 		}
 
 		popupState.pickedSelection = await loadSiteSelection(popupState.activeSite.hostname);
-		const selector = popupState.pickedSelection?.selector?.trim();
-		const htmlSnippet = siteOverrideSnippetInput.value.trim();
+		const overrides = await loadSiteOverrides();
+		const hostname = popupState.activeSite.hostname;
+		const existingOverride = overrides.find((entry) => entry.hostname === hostname);
+		const enabled = siteOverrideEnabledInput.checked;
+		// A fresh pick wins; otherwise keep the element the saved override already targets,
+		// so toggling or editing the snippet does not require re-picking.
+		const selector = popupState.pickedSelection?.selector?.trim() || existingOverride?.selector || "";
+		const htmlSnippet = siteOverrideSnippetInput.value.trim() || (enabled ? "" : existingOverride?.htmlSnippet ?? "");
 
-		if (!selector) {
-			showStatus("Pick a page element first.");
-			return;
-		}
-
-		if (!htmlSnippet) {
-			showStatus("Paste the tag snippet before saving.");
+		if (!selector || !htmlSnippet) {
+			if (!enabled && !existingOverride) {
+				showStatus("Override is off. Nothing is saved for this website.");
+				return;
+			}
+			showStatus(!selector ? "Pick a page element first." : "Paste the tag snippet before saving.");
 			return;
 		}
 
 		await refreshUserScriptWarning();
 
 		const nextOverride: SiteOverrideRule = {
-			hostname: popupState.activeSite.hostname,
+			hostname,
 			selector,
 			placement: AdCheckShared.normalizePlacement(siteOverridePlacementSelect.value),
 			htmlSnippet,
-			enabled: siteOverrideEnabledInput.checked,
+			enabled,
 			updatedAt: Date.now(),
 		};
 
-		const overrides = await loadSiteOverrides();
 		const remainingOverrides = overrides.filter(
 			(entry) => entry.hostname !== nextOverride.hostname,
 		);
@@ -384,9 +398,11 @@
 			[AdCheckShared.SITE_OVERRIDE_STORAGE_KEY]: remainingOverrides,
 		});
 
-		renderPickedSelection(popupState.pickedSelection);
+		renderPickedSelection(popupState.pickedSelection ?? selectorToSelection(selector));
 		showStatus(
-			hasInlineScript(htmlSnippet) && popupState.userScriptStatus?.available === false
+			!enabled
+				? "Site override turned off for this website."
+				: hasInlineScript(htmlSnippet) && popupState.userScriptStatus?.available === false
 				? "Saved, but inline scripts still need the user-script permission warning resolved below."
 				: "Site override saved for this website.",
 		);
@@ -608,7 +624,11 @@
 		bindSectionActions();
 		bindBlockedRouteActions();
 		bindWindowGlobalsActions();
-		formRoot.oninput = () => { renderUserScriptWarning(); };
+		formRoot.oninput = (event) => {
+			const target = event.target as HTMLElement | null;
+			if (target instanceof HTMLInputElement && target.hasAttribute("data-wg-path")) target.title = target.value;
+			renderUserScriptWarning();
+		};
 		renderIgnoreSiteControl(settings);
 	}
 
@@ -1110,32 +1130,7 @@
 		const bundleOptions = settings.bundles.filter((b) => b.trim().length > 0);
 
 		const rows = (entries.length > 0 ? entries : [{ path: "", awaitBundle: "" }])
-			.map(
-				(entry, index) => `
-          <div class="adcheck-wg-entry-row" data-wg-row="${index}">
-            <input
-              class="adcheck-entry-input"
-              type="text"
-              value="${escapeHtml(entry.path)}"
-              placeholder="e.g. window._pbjsGlobals"
-              data-wg-path
-            />
-            <div class="adcheck-wg-select-wrapper">
-              <select class="adcheck-wg-select" data-wg-bundle>
-                <option value="">Immediately</option>
-                ${bundleOptions
-									.map(
-										(bundle) =>
-											`<option value="${escapeHtml(bundle)}"${entry.awaitBundle === bundle ? " selected" : ""}>${escapeHtml(bundle)}</option>`,
-									)
-									.join("")}
-              </select>
-              <span class="adcheck-wg-select-arrow" aria-hidden="true">›</span>
-            </div>
-            <button class="adcheck-row-remove" type="button" data-wg-remove aria-label="Remove window global">×</button>
-          </div>
-        `,
-			)
+			.map((entry, index) => `<div class="adcheck-wg-entry-row" data-wg-row="${index}">${renderWindowGlobalRowContent(entry, bundleOptions)}</div>`)
 			.join("");
 
 		return `
@@ -1378,25 +1373,7 @@
 		const bundleOptions = getCurrentBundleOptions();
 		const wrapper = document.createElement("div");
 		wrapper.className = "adcheck-wg-entry-row";
-		wrapper.innerHTML = `
-      <input
-        class="adcheck-entry-input"
-        type="text"
-        value=""
-        placeholder="e.g. window._pbjsGlobals"
-        data-wg-path
-      />
-      <div class="adcheck-wg-select-wrapper">
-        <select class="adcheck-wg-select" data-wg-bundle>
-          <option value="">Immediately</option>
-          ${bundleOptions
-						.map((bundle) => `<option value="${escapeHtml(bundle)}">${escapeHtml(bundle)}</option>`)
-						.join("")}
-        </select>
-        <span class="adcheck-wg-select-arrow" aria-hidden="true">›</span>
-      </div>
-      <button class="adcheck-row-remove" type="button" data-wg-remove aria-label="Remove window global">×</button>
-    `;
+		wrapper.innerHTML = renderWindowGlobalRowContent({ path: "", awaitBundle: "" }, bundleOptions);
 
 		list.appendChild(wrapper);
 		wrapper.querySelector<HTMLInputElement>("[data-wg-path]")?.focus();
@@ -1433,13 +1410,47 @@
 				continue;
 			}
 
+			const label = row.querySelector<HTMLInputElement>("[data-wg-label]")?.value.trim() ?? "";
 			entries.push({
 				path,
 				awaitBundle: bundleSelect?.value.trim() ?? "",
+				...(label && label !== path ? { label } : {}),
 			});
 		}
 
 		return entries;
+	}
+
+	function renderWindowGlobalRowContent(entry: AdCheckShared.WindowGlobalEntry, bundleOptions: string[]): string {
+		return `
+      <input
+        class="adcheck-entry-input adcheck-wg-path"
+        type="text"
+        value="${escapeHtml(entry.path)}"
+        title="${escapeHtml(entry.path)}"
+        placeholder="e.g. window._pbjsGlobals"
+        aria-label="Window global path"
+        data-wg-path
+      />
+      <div class="adcheck-wg-select-wrapper">
+        <select class="adcheck-wg-select" data-wg-bundle aria-label="When to read">
+          <option value="">Immediately</option>
+          ${bundleOptions
+						.map((bundle) => `<option value="${escapeHtml(bundle)}"${entry.awaitBundle === bundle ? " selected" : ""}>After ${escapeHtml(bundle)}</option>`)
+						.join("")}
+        </select>
+        <span class="adcheck-wg-select-arrow" aria-hidden="true">›</span>
+      </div>
+      <button class="adcheck-row-remove" type="button" data-wg-remove aria-label="Remove window global">×</button>
+      <input
+        class="adcheck-entry-input adcheck-wg-label"
+        type="text"
+        value="${escapeHtml(entry.label ?? "")}"
+        placeholder="Display name (optional), e.g. Section ID"
+        aria-label="Display name shown in the widget"
+        data-wg-label
+      />
+    `;
 	}
 
 	function getCurrentBundleOptions(): string[] {

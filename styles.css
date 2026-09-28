@@ -513,6 +513,16 @@
     flex-shrink: 1;
 }
 
+/* Full window-global path, shown under a custom display name */
+.adcheck-result-path {
+    margin: 2px 0 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10px;
+    line-height: 1.35;
+    color: var(--adcheck-ink-soft);
+    overflow-wrap: anywhere;
+}
+
 /* Status pill — colored by status */
 .adcheck-result-pill {
     flex-shrink: 0;
@@ -916,8 +926,21 @@
 .adcheck-wg-entry-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 0.65fr) 38px;
-    gap: 8px;
+    gap: 6px 8px;
     align-items: center;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed rgba(18, 33, 45, 0.08);
+}
+
+.adcheck-wg-entry-row:last-child {
+    padding-bottom: 0;
+    border-bottom: 0;
+}
+
+.adcheck-wg-label {
+    grid-column: 1 / 3;
+    min-height: 32px;
+    font-size: 12px;
 }
 
 .adcheck-wg-select-wrapper {
@@ -1756,3 +1779,7 @@
 #blockingStatus { font-size: 12px; margin: 4px 0 0; }
 [data-blocked-route-remove] { grid-column: 3; grid-row: 1; }
 #globalPermissionWarning:not(:empty), #importPreview:not(:empty) { padding: 10px; background: #fff3cd; color: #533f03; overflow-wrap: anywhere; }
+.adcheck-import-export-options { margin-top: 12px; }
+#importModeHelp { margin: 6px 0 12px; }
+#importPreview:empty { display: none; }
+#importPreview:not(:empty) { margin: 0 0 12px; border-radius: 10px; font-size: 12px; }

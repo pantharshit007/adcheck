@@ -308,9 +308,11 @@ namespace AdCheckShared {
 				continue;
 			}
 
+			const label = typeof candidate.label === "string" ? candidate.label.trim() : "";
 			entries.push({
 				path,
 				awaitBundle: typeof candidate.awaitBundle === "string" ? candidate.awaitBundle.trim() : "",
+				...(label && label !== path ? { label } : {}),
 			});
 		}
 

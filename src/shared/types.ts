@@ -28,6 +28,8 @@ declare namespace AdCheckShared {
   interface WindowGlobalEntry {
     path: string;
     awaitBundle: string;
+    /** Optional short name shown in the widget instead of the full path. */
+    label?: string;
   }
 
   interface Settings {

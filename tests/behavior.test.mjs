@@ -260,6 +260,8 @@ test('settings normalization rejects malformed entries and does not mutate defau
   const settings = shared.mergeSettings({bundles:[' ad.js ','ad.js',null,5],blockedRoutes:[null,{value:'ad.js',enabled:false}],blockingHostname:'HTTPS://Publisher.Test/path'});
   assert.deepEqual([...settings.bundles],['ad.js']); assert.equal(settings.blockedRoutes[0].enabled,false);
   assert.equal(settings.blockingHostname,'publisher.test');
+  const globals = shared.mergeSettings({windowGlobals:[{path:'window.a.b',awaitBundle:'',label:' Section '},{path:'window.c',awaitBundle:'',label:'window.c'},{path:'window.d',awaitBundle:''}]}).windowGlobals;
+  assert.equal(globals[0].label,'Section'); assert.equal('label' in globals[1],false); assert.equal('label' in globals[2],false);
   settings.bundles.push('another.js'); assert.deepEqual([...shared.cloneDefaultSettings().bundles],['script.js']);
 });
 
