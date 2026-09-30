@@ -21,9 +21,36 @@ namespace AdCheckShared {
 			ignoredDomains: [],
 			windowGlobals: [],
 			blockedRoutesEnabled: true,
-            blockingHostname: "",
 			blockedRoutes: [],
+			displayNames: {},
 		};
+
+	export const LABELED_SECTIONS: readonly LabeledSectionKey[] = ["attributes", "cookies", "localStorageKeys"];
+
+	export function isLabeledSection(key: string): key is LabeledSectionKey {
+		return (LABELED_SECTIONS as readonly string[]).includes(key);
+	}
+
+	export function getDisplayName(settings: Settings, section: LabeledSectionKey, value: string): string {
+		return settings.displayNames[section]?.[value] || value;
+	}
+
+	// Keep only non-empty names for entries that still exist and differ from the entry itself.
+	export function normalizeDisplayNames(value: unknown, settings: Pick<Settings, LabeledSectionKey>): DisplayNames {
+		const result: DisplayNames = {};
+		if (!value || typeof value !== "object" || Array.isArray(value)) return result;
+		for (const section of LABELED_SECTIONS) {
+			const names = (value as Record<string, unknown>)[section];
+			if (!names || typeof names !== "object" || Array.isArray(names)) continue;
+			const cleaned: Record<string, string> = {};
+			for (const entry of settings[section]) {
+				const name = (names as Record<string, unknown>)[entry];
+				if (typeof name === "string" && name.trim() && name.trim() !== entry) cleaned[entry] = name.trim();
+			}
+			if (Object.keys(cleaned).length) result[section] = cleaned;
+		}
+		return result;
+	}
 
 	export const SETTINGS_SECTIONS = [
 		{
@@ -85,8 +112,8 @@ namespace AdCheckShared {
 			ignoredDomains: [...DEFAULT_SETTINGS.ignoredDomains],
 			windowGlobals: DEFAULT_SETTINGS.windowGlobals.map((entry) => ({ ...entry })),
 			blockedRoutesEnabled: DEFAULT_SETTINGS.blockedRoutesEnabled,
-            blockingHostname: DEFAULT_SETTINGS.blockingHostname,
 			blockedRoutes: DEFAULT_SETTINGS.blockedRoutes.map((entry) => ({ ...entry })),
+			displayNames: {},
 		};
 	}
 
@@ -96,7 +123,7 @@ namespace AdCheckShared {
 			return defaults;
 		}
 
-		return {
+		const merged: Settings = {
 			enabled: typeof candidate.enabled === "boolean" ? candidate.enabled : defaults.enabled,
 			widgetCollapsed:
 				typeof candidate.widgetCollapsed === "boolean"
@@ -114,7 +141,6 @@ namespace AdCheckShared {
 				(candidate as Record<string, unknown>).windowGlobals,
 				defaults.windowGlobals,
 			),
-			blockingHostname: typeof candidate.blockingHostname === "string" ? normalizeIgnoredDomain(candidate.blockingHostname) : "",
 			blockedRoutesEnabled:
 				typeof candidate.blockedRoutesEnabled === "boolean"
 					? candidate.blockedRoutesEnabled
@@ -123,7 +149,10 @@ namespace AdCheckShared {
 				(candidate as Record<string, unknown>).blockedRoutes,
 				defaults.blockedRoutes,
 			),
+			displayNames: {},
 		};
+		merged.displayNames = normalizeDisplayNames(candidate.displayNames, merged);
+		return merged;
 	}
 
 	export function normalizeEntries(value: unknown, fallback: string[] = []): string[] {
@@ -216,6 +245,7 @@ namespace AdCheckShared {
 	export function looksLikeRegexPattern(value: string): boolean {
 		return /[|()[\]{}+*$^\\]/.test(value);
 	}
+
 
 	export function tabStateStorageKey(tabId: number): string {
 		return `${TAB_STATE_PREFIX}${tabId}`;

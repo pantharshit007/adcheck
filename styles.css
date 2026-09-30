@@ -1263,6 +1263,23 @@
     align-items: center;
 }
 
+.adcheck-entry-row.has-display-name {
+    row-gap: 6px;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed rgba(18, 33, 45, 0.08);
+}
+
+.adcheck-entry-row.has-display-name:last-child {
+    padding-bottom: 0;
+    border-bottom: 0;
+}
+
+.adcheck-entry-display-name {
+    grid-column: 1;
+    min-height: 32px;
+    font-size: 12px;
+}
+
 .adcheck-entry-input {
     min-width: 0;
     width: 97%;
@@ -1775,11 +1792,8 @@
 [data-blocked-route-status][data-state="invalid"] { color: #b42318; }
 [data-blocked-route-status][data-state="installed"] { color: #067647; }
 .adcheck-blocked-routes-master label.adcheck-inline-field-label { display: grid; gap: 4px; margin: 8px 0; }
-#disableAllBlocking { margin-bottom: 4px; }
 #blockingStatus { font-size: 12px; margin: 4px 0 0; }
 [data-blocked-route-remove] { grid-column: 3; grid-row: 1; }
 #globalPermissionWarning:not(:empty), #importPreview:not(:empty) { padding: 10px; background: #fff3cd; color: #533f03; overflow-wrap: anywhere; }
-.adcheck-import-export-options { margin-top: 12px; }
-#importModeHelp { margin: 6px 0 12px; }
 #importPreview:empty { display: none; }
-#importPreview:not(:empty) { margin: 0 0 12px; border-radius: 10px; font-size: 12px; }
+#importPreview:not(:empty) { margin: 12px 0; border-radius: 10px; font-size: 12px; }

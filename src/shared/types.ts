@@ -45,9 +45,13 @@ declare namespace AdCheckShared {
     ignoredDomains: string[];
     windowGlobals: WindowGlobalEntry[];
     blockedRoutesEnabled: boolean;
-    blockingHostname: string;
     blockedRoutes: BlockedRouteEntry[];
+    /** Optional short names shown in the widget, keyed by section and then by entry. */
+    displayNames: DisplayNames;
   }
+
+  type LabeledSectionKey = "attributes" | "cookies" | "localStorageKeys";
+  type DisplayNames = Partial<Record<LabeledSectionKey, Record<string, string>>>;
 
   interface BlockedRouteEntry {
     value: string;
@@ -89,6 +93,8 @@ declare namespace AdCheckShared {
     detail: string;
     detailIsHtml?: boolean;
     failureMessage?: string;
+    /** The configured name when `label` is a custom display name. */
+    sourceName?: string;
   }
 
   interface BundleCheckResult extends CheckResultBase {

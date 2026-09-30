@@ -32,7 +32,7 @@ function fixture(kind = 'background') {
   evaluate(context, 'src/shared/defaults.ts');
   if (kind === 'background') evaluate(context, 'src/background.ts', 'settingsCache, getTabState, pendingRequests, syncBlockedRouteRules, ensureSettings, unready: () => {trackingReady = false;}, ready: () => {trackingReady = true; for (const event of earlyEvents.splice(0)) event();}, getStatus: () => blockingStatus, earlyEventCount: () => earlyEvents.length');
   else if (kind === 'popup') evaluate(context, 'src/popup.ts', 'parseBackup');
-  else evaluate(context, 'src/content.ts', 'state, buildBundleResults, buildWindowGlobalResults, runChecks, applySettings, executeOverrideScriptsInOrder, teardownSiteOverride, tryApplySiteOverride');
+  else evaluate(context, 'src/content.ts', 'state, buildSnapshot, buildBundleResults, buildWindowGlobalResults, runChecks, applySettings, executeOverrideScriptsInOrder, teardownSiteOverride, tryApplySiteOverride');
   if (kind === "background") context.api.ready();
   return {context, chrome, warnings, listeners, microtasks, api: context.api, shared: context.AdCheckShared, timers, rules: () => rules, writes: () => writes, notifications: () => notifications};
 }
@@ -129,18 +129,30 @@ test('HTTP errors and blocked requests fail immediately; successful scripts pass
   assert.equal(f.api.buildBundleResults()[0].status, 'fail');
 });
 
-test('DNR rejects unsupported regex and flags while retaining valid rules; scope, ignore and pause apply', async () => {
-  const f = fixture(); Object.assign(f.api.settingsCache.current, {enabled: true, blockingHostname: 'publisher.test', blockedRoutes: [{value: 'ads.js', enabled: true}, {value: '/(?=bad)/', enabled: true}, {value: '/ads/g', enabled: true}]});
+test('blocked routes apply on all sites except ignored domains', async () => {
+  const f = fixture();
+  f.chrome.tabs.query = async () => [{id: 1, url: 'https://www.publisher.test/'}, {id: 2, url: 'https://other.test/'}, {id: 3, url: 'https://ignored.test/'}];
+  Object.assign(f.api.settingsCache.current, {enabled: true, ignoredDomains: ['ignored.test'], blockedRoutes: [{value: 'ads?pvsid', enabled: true}, {value: 'ads?en', enabled: false}]});
   await f.api.syncBlockedRouteRules();
-  assert.equal(f.rules().length, 1); assert.deepEqual([...f.rules()[0].condition.tabIds], [1]);
+  assert.equal(f.rules().length, 1);
+  assert.equal(f.rules()[0].condition.tabIds, undefined);
+  assert.deepEqual([...f.rules()[0].condition.excludedTabIds], [3]);
+  assert.match(f.api.getStatus()[0].message, /all sites/);
+  assert.equal(f.api.getStatus()[1].message, 'This rule is unchecked.');
+});
+
+test('DNR rejects unsupported regex and flags while retaining valid rules; ignore and pause apply', async () => {
+  const f = fixture(); Object.assign(f.api.settingsCache.current, {enabled: true, blockedRoutes: [{value: 'ads.js', enabled: true}, {value: '/(?=bad)/', enabled: true}, {value: '/ads/g', enabled: true}]});
+  await f.api.syncBlockedRouteRules();
+  assert.equal(f.rules().length, 1); assert.equal(f.rules()[0].condition.tabIds, undefined);
   assert.equal(f.api.getStatus().filter(x => x.state === 'invalid').length, 2);
-  f.api.settingsCache.current.ignoredDomains = ['publisher.test']; await f.api.syncBlockedRouteRules(); assert.equal(f.rules().length, 0);
+  f.api.settingsCache.current.ignoredDomains = ['publisher.test']; await f.api.syncBlockedRouteRules(); assert.deepEqual([...f.rules()[0].condition.excludedTabIds], [1]);
   f.api.settingsCache.current.ignoredDomains = []; f.api.settingsCache.current.enabled = false;
   await f.api.syncBlockedRouteRules(); assert.equal(f.rules().length, 0);
 });
 
 test('blocked routes use regex only when explicit and keep URL-filter syntax', async () => {
-  const f = fixture(); Object.assign(f.api.settingsCache.current, {enabled: true, blockingHostname: 'publisher.test', blockedRoutes: [
+  const f = fixture(); Object.assign(f.api.settingsCache.current, {enabled: true, blockedRoutes: [
     {value: '/ads\\/|tracking/i', enabled: true}, {value: '||ads.example.com^', enabled: true}, {value: 'regex:track(ing)?', enabled: true}, {value: '/ads\\/|tracking', enabled: true}
   ]});
   await f.api.syncBlockedRouteRules();
@@ -207,7 +219,7 @@ test('override teardown cancels the remaining script sequence', async () => {
 
 test('DNR limits report omitted rules and later synchronization recovers after rejection', async () => {
   const f = fixture(); f.chrome.declarativeNetRequest.MAX_NUMBER_OF_SESSION_RULES = 1;
-  Object.assign(f.api.settingsCache.current, {enabled:true,blockingHostname:'publisher.test',blockedRoutes:[{value:'first',enabled:true},{value:'second',enabled:true}]});
+  Object.assign(f.api.settingsCache.current, {enabled:true,blockedRoutes:[{value:'first',enabled:true},{value:'second',enabled:true}]});
   await f.api.syncBlockedRouteRules(); assert.equal(f.rules().length, 1);
   assert.equal(f.api.getStatus()[1].state, 'omitted-due-to-limit');
   const update = f.chrome.declarativeNetRequest.updateSessionRules;
@@ -245,21 +257,33 @@ test('pause cancels queued persistence and widget-only settings preserve history
   assert.equal(f.writes(), 0); assert.equal(f.api.pendingRequests.size, 0);
 });
 
-test('versioned backups validate per hostname and legacy settings remain importable', () => {
+test('display names for attributes, cookies and local storage keys are normalized and shown in the widget', () => {
+  const {shared} = fixture();
+  const settings = shared.mergeSettings({cookies: ['uid', 'sid'], attributes: ['data-instreamplayermode'], displayNames: {
+    cookies: {uid: ' User ID ', sid: 'sid', removed: 'Gone'}, attributes: {'data-instreamplayermode': 'Player mode'}, bundles: {x: 'y'}
+  }});
+  assert.deepEqual(JSON.parse(JSON.stringify(settings.displayNames)), {attributes: {'data-instreamplayermode': 'Player mode'}, cookies: {uid: 'User ID'}});
+  assert.equal(shared.getDisplayName(settings, 'cookies', 'sid'), 'sid');
+  assert.deepEqual(JSON.parse(JSON.stringify(shared.mergeSettings({cookies: ['a']}).displayNames)), {});
+  const c = fixture('content');
+  Object.assign(c.api.state.settings, {cookies: ['uid'], displayNames: {cookies: {uid: 'User ID'}}});
+  c.context.document.cookie = 'uid=42';
+  const [cookie] = c.api.buildSnapshot().cookies;
+  assert.equal(cookie.label, 'User ID'); assert.equal(cookie.sourceName, 'uid'); assert.equal(cookie.key, 'cookie:uid');
+});
+
+test('backups are plain settings objects', () => {
   const f = fixture('popup');
-  const valid = {hostname:'publisher.test',selector:'#slot',placement:'afterend',htmlSnippet:'<div>Ad</div>',enabled:true,updatedAt:1};
-  const backup = f.api.parseBackup(JSON.stringify({version:1,settings:{enabled:true},overrides:[valid,{...valid,hostname:'bad.test',selector:'['}]}));
-  assert.equal(backup.overrides.length,1); assert.match(backup.errors[0],/bad.test/);
-  assert.equal(f.api.parseBackup(JSON.stringify({enabled:true,bundles:['ad.js']})).settings.enabled,true);
-  assert.equal(f.api.parseBackup('{"version":2,"settings":{}}'),null);
-  assert.equal(f.api.parseBackup('[]'),null);
+  const settings = f.api.parseBackup(JSON.stringify({enabled:true,bundles:['ad.js']}));
+  assert.equal(settings.enabled,true); assert.deepEqual([...settings.bundles],['ad.js']);
+  assert.equal(f.api.parseBackup('[]'),null); assert.equal(f.api.parseBackup('not json'),null);
 });
 
 test('settings normalization rejects malformed entries and does not mutate defaults', () => {
   const {shared} = fixture();
-  const settings = shared.mergeSettings({bundles:[' ad.js ','ad.js',null,5],blockedRoutes:[null,{value:'ad.js',enabled:false}],blockingHostname:'HTTPS://Publisher.Test/path'});
+  const settings = shared.mergeSettings({bundles:[' ad.js ','ad.js',null,5],blockedRoutes:[null,{value:'ad.js',enabled:false}]});
   assert.deepEqual([...settings.bundles],['ad.js']); assert.equal(settings.blockedRoutes[0].enabled,false);
-  assert.equal(settings.blockingHostname,'publisher.test');
+  assert.equal('blockingHostname' in shared.mergeSettings({blockingHostname:'publisher.test'}),false);
   const globals = shared.mergeSettings({windowGlobals:[{path:'window.a.b',awaitBundle:'',label:' Section '},{path:'window.c',awaitBundle:'',label:'window.c'},{path:'window.d',awaitBundle:''}]}).windowGlobals;
   assert.equal(globals[0].label,'Section'); assert.equal('label' in globals[1],false); assert.equal('label' in globals[2],false);
   settings.bundles.push('another.js'); assert.deepEqual([...shared.cloneDefaultSettings().bundles],['script.js']);

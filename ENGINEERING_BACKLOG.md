@@ -24,14 +24,14 @@ loading and DNR enforcement have not been exercised in the collaborative browser
   reload; Resource Timing covers scripts loaded before tracking began.
 - Overrides track inserted nodes, replace reversible markup, cancel remaining
   script steps, and show selector errors. Executed script effects require reload.
-- Blocking now requires a selected hostname and uses session rules scoped to
-  eligible tabs and initiators. Existing browser-wide dynamic rules are removed.
+- Blocking uses session rules that apply on every site except ignored domains.
+  Each rule has its own checkbox, and the master switch applies instantly.
+  Existing dynamic rules are migrated to session rules.
   The popup reports Chrome validation, installation, limits, and disable state.
 - Global checks preflight user-script access; checks run single-flight with stale
   results discarded. Cookie decoding falls back to raw malformed values.
-- Version 1 backups optionally include overrides, preview hostnames and errors,
-  and support merge, replace, and skip-conflict policies. Legacy settings import
-  remains supported.
+- Import and export stay settings-only (the plain settings object, as before).
+  Site overrides are not part of backups; the P2 item below was declined.
 - Privacy documentation covers Sync, local and session retention, URL redaction,
   and each retained permission. Redundant `tabs` and `activeTab` were removed.
 

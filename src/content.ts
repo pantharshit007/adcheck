@@ -938,7 +938,8 @@
 
 			return {
 				key: `attribute:${attributeName}`,
-				label: attributeName,
+				label: AdCheckShared.getDisplayName(state.settings, "attributes", attributeName),
+				sourceName: attributeName,
 				status,
 				explanation: HELP_COPY.attributes,
 				detail,
@@ -958,7 +959,8 @@
 			const status = value !== undefined ? "pass" : pendingOrFailedStatus();
 			return {
 				key: `cookie:${cookieName}`,
-				label: cookieName,
+				label: AdCheckShared.getDisplayName(state.settings, "cookies", cookieName),
+				sourceName: cookieName,
 				status,
 				explanation: HELP_COPY.cookies,
 				detail:
@@ -990,7 +992,8 @@
 			const status = value !== null ? "pass" : pendingOrFailedStatus();
 			return {
 				key: `localStorage:${storageKey}`,
-				label: storageKey,
+				label: AdCheckShared.getDisplayName(state.settings, "localStorageKeys", storageKey),
+				sourceName: storageKey,
 				status,
 				explanation: HELP_COPY.localStorageKeys,
 				detail:
@@ -1229,13 +1232,14 @@
         <div class="adcheck-status-icon is-${result.status}">${statusIcon}</div>
         <div class="adcheck-result-body">
           <div class="adcheck-result-label-row">
-            <span class="adcheck-result-label">${escapeHtml(result.label)}</span>
+            <span class="adcheck-result-label" title="${escapeAttribute(result.sourceName ?? result.label)}">${escapeHtml(result.label)}</span>
             <span class="adcheck-result-pill is-${result.status}">${escapeHtml(result.status)}</span>
             <button class="adcheck-info-btn" type="button" aria-label="What does this check?">
               <span class="adcheck-info-icon">i</span>
               <span class="adcheck-info-tooltip">${escapeHtml(result.explanation)}</span>
             </button>
           </div>
+          ${result.sourceName && result.sourceName !== result.label ? `<p class="adcheck-result-path">${escapeHtml(result.sourceName)}</p>` : ""}
           <p class="${detailClass}">${visibleDetail}</p>
           ${hint ? `<p class="adcheck-result-detail is-failure">${escapeHtml(hint)}</p>` : ""}
           ${domAction}

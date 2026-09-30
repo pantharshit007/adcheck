@@ -338,28 +338,28 @@
     const dnr = chrome.declarativeNetRequest;
     const settings = settingsCache.current;
     const tabs = await chrome.tabs.query({});
-    const tabIds = tabs.filter(tab => {
-      try {
-        const hostname = new URL(tab.url ?? "").hostname;
-        return hostname === settings.blockingHostname && !settings.ignoredDomains.some(entry => AdCheckShared.matchesIgnoredDomain(entry, hostname));
-      } catch { return false; }
-    }).flatMap(tab => typeof tab.id === "number" ? [tab.id] : []);
+    const tabHost = (tab: chrome.tabs.Tab): string => { try { return new URL(tab.url ?? "").hostname; } catch { return ""; } };
+    const isIgnored = (hostname: string) => settings.ignoredDomains.some(entry => AdCheckShared.matchesIgnoredDomain(entry, hostname));
+    const ids = (list: chrome.tabs.Tab[]) => list.flatMap(tab => typeof tab.id === "number" ? [tab.id] : []);
+    // Rules apply on every site except tabs on ignored domains.
+    const ignoredTabIds = ids(tabs.filter(tab => { const h = tabHost(tab); return !!h && isIgnored(h); }));
     const existing = await dnr.getSessionRules();
     const legacy = await dnr.getDynamicRules();
-    // Remove older browser-wide rules even when paused.
+    // Remove older dynamic rules; AdCheck now installs session rules only.
     await dnr.updateDynamicRules({ removeRuleIds: legacy.filter(rule => rule.id >= BLOCKED_ROUTE_RULE_ID_BASE).map(rule => rule.id) });
     const rules: chrome.declarativeNetRequest.Rule[] = [];
     const statuses: typeof blockingStatus = [];
     let regexCount = 0;
     const inactiveReason = !settings.enabled ? "AdCheck is paused."
-      : !settings.blockedRoutesEnabled ? "Route blocking is turned off."
-      : !settings.blockingHostname ? "Enter a blocking hostname to activate this rule." : "";
+      : !settings.blockedRoutesEnabled ? "Route blocking is turned off." : "";
     for (const entry of settings.blockedRoutes) {
-      const status = {value: entry.value, state: "saved", message: `Waiting: open ${settings.blockingHostname} in a tab to activate.`};
+      const status = {value: entry.value, state: "saved", message: ""};
       statuses.push(status);
-      if (inactiveReason || !entry.enabled) { status.state = "disabled"; status.message = inactiveReason || "This rule is unchecked."; continue; }
+      if (!entry.enabled) { status.state = "disabled"; status.message = "This rule is unchecked."; continue; }
+      if (inactiveReason) { status.state = "disabled"; status.message = inactiveReason; continue; }
       const value = entry.value.trim();
-      const condition: chrome.declarativeNetRequest.RuleCondition = {tabIds, initiatorDomains: [settings.blockingHostname], excludedResourceTypes: ["main_frame"]};
+      const condition: chrome.declarativeNetRequest.RuleCondition = {excludedResourceTypes: ["main_frame"]};
+      if (ignoredTabIds.length) condition.excludedTabIds = ignoredTabIds;
       // Regex only when explicit: /pattern/, /pattern/i, or regex:pattern. Everything
       // else is a DNR urlFilter, so filter syntax such as ||host^ keeps its meaning.
       const slashMatch = value.match(/^\/(.+)\/([a-z]*)$/);
@@ -378,13 +378,12 @@
       if (rules.length >= Math.min(dnr.MAX_NUMBER_OF_SESSION_RULES ?? 5000, 1000) || (regex && regexCount >= (dnr.MAX_NUMBER_OF_REGEX_RULES ?? 1000))) {
         status.state = "omitted-due-to-limit"; status.message = "Chrome rule limit reached."; continue;
       }
-      if (!tabIds.length) continue;
       if (regex) regexCount++;
       rules.push({id: BLOCKED_ROUTE_RULE_ID_BASE + rules.length, action: {type: "block"}, condition});
       status.state = "installed";
       status.message = !regex && /[()[\]{}+$\\]/.test(value)
         ? "Active as a URL filter. To use it as a regex, write /pattern/i or regex:pattern."
-        : `Active on ${settings.blockingHostname}.`;
+        : "Active on all sites.";
     }
     try {
       await dnr.updateSessionRules({removeRuleIds: existing.filter(rule => rule.id >= BLOCKED_ROUTE_RULE_ID_BASE).map(rule => rule.id), addRules: rules});
@@ -663,10 +662,11 @@
       let hostname = "";
       try { hostname = new URL(details.url).hostname; } catch { /* Keep empty. */ }
       tabHosts.set(details.tabId, hostname);
-      // Install tab-scoped blocking before the new document starts requesting
+      // Refresh ignored-tab exclusions before the new document starts requesting
       // subresources, rather than waiting for tabs.onUpdated.
-      const blockingHost = settingsCache.current.blockingHostname;
-      if (blockingHost && previousHost !== hostname && (hostname === blockingHost || previousHost === blockingHost)) void syncBlockedRouteRules();
+      const settings = settingsCache.current;
+      const affectsScope = (host: string | undefined) => !!host && settings.ignoredDomains.some(entry => AdCheckShared.matchesIgnoredDomain(entry, host));
+      if (settings.enabled && settings.blockedRoutesEnabled && previousHost !== hostname && (affectsScope(previousHost) || affectsScope(hostname))) void syncBlockedRouteRules();
       return;
     }
     // Retain every script (redacted and bounded) so the widget can re-match

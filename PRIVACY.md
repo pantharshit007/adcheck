@@ -11,8 +11,8 @@ It inspects pages to perform the checks you configure.
   and widget preferences remain until you change or clear them. Chrome may sync
   these settings through your Google account when Chrome Sync is enabled.
 - **Local extension storage:** hostname-specific selectors and override snippets
-  remain until deleted, replaced by an import, or the extension is uninstalled.
-  Picker selections also stay locally until cleared. They are not in backups.
+  remain until deleted or the extension is uninstalled. They and picker
+  selections stay on this device and are never included in backups.
 - **Session storage and worker memory:** up to 200 completed script requests per
   tab (scripts matching your checks are kept first) plus script requests still in
   flight, while at least one bundle check is configured. Non-script requests are
@@ -33,10 +33,9 @@ patterns can themselves contain identifiers, so choose them accordingly.
 
 ## Backups and user-provided scripts
 
-Settings-only exports contain Chrome Sync configuration. Full exports also contain
-local site overrides. Both are ordinary files under your control, without network
-history or picker state. Imports preview hostnames and let you merge, replace, or
-skip conflicting overrides. Treat snippets as executable code: injected scripts
+Exports contain only Chrome Sync settings, as ordinary files under your control,
+without site overrides, network history, or picker state. Imports apply settings
+only. Treat override snippets as executable code: injected scripts
 can make network requests and interact with the publisher page. External script
 fallback loading may fetch a URL you configured. This is distinct from AdCheck
 sending telemetry. Removing an override removes its tracked markup; already-run
@@ -48,9 +47,9 @@ script effects require reloading the page.
 - `webRequest`: observe script starts, responses, and failures.
 - `userScripts`: execute configured override scripts and inspect window globals in
   the page context, with Chrome's user-script access enabled.
-- `declarativeNetRequest`: install site-scoped blocking rules. Only subresources in
-  eligible tabs on the selected exact hostname are blocked; pause and ignored
-  domains disable these rules. The popup can disable all blocking immediately.
+- `declarativeNetRequest`: install your blocking rules. They apply to subresources
+  on every site; pause and ignored domains disable them. The popup's route-blocking
+  switch turns all blocking off immediately.
 - HTTP/HTTPS host access: inject the widget, observe requests, inspect page context,
   fetch configured external scripts, and read eligible tab URLs for site scope.
   Separate `tabs` and `activeTab` permissions are unnecessary with this host access
