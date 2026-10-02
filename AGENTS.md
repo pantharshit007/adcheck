@@ -36,6 +36,8 @@ Use these commands from the repo root:
 
 When making code changes, prefer running `npm run typecheck` and `npm run build` before finishing.
 
+For new changes/feature/bug-fix make sure to bump the package version in package and manifest.json in PR.
+
 ## Working Conventions
 
 - Keep the extension lightweight and framework-free unless explicitly requested otherwise.
@@ -49,6 +51,7 @@ When making code changes, prefer running `npm run typecheck` and `npm run build`
 - Do not run delete commands such as `rm`, `rm -rf`, or similar without explicit user permission for the current session.
 - Do not read sensitive or `.gitignored` files such as `.env`, `.env.local`, or other ignored secrets without explicit user permission.
 - Never revert user changes unless the user explicitly asks for that.
+- Do not commit or push changes to the repo without explicit user permission.
 
 ## Notes For Future Work
 

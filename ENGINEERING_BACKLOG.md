@@ -8,6 +8,35 @@ Priorities use this scale:
 - **P1:** Important reliability or usability problem with a reasonable workaround.
 - **P2:** Product improvement, maintainability work, or lower-risk correctness issue.
 
+## Implementation status — September 27, 2026
+
+All items below are implemented on `fix/engineering-backlog`. Validation and native
+Chrome integration steps are recorded in [tests/README.md](tests/README.md).
+Automated behavior checks and browser DOM fixtures pass; native Chrome extension
+loading and DNR enforcement have not been exercised in the collaborative browser.
+
+- Network updates use a synchronous reducer, navigation-scoped pending requests,
+  and ordered, batched session persistence. URLs are redacted after matching.
+- Bundle checks require script resources and successful HTTP responses. Bare names
+  match case-insensitively anywhere in the script's host and path (never the query);
+  `filename:`, `url:` and `regex:` select explicit alternatives. All script requests
+  are retained (bounded, redacted) so edited bundle names re-evaluate without a
+  reload; Resource Timing covers scripts loaded before tracking began.
+- Overrides track inserted nodes, replace reversible markup, cancel remaining
+  script steps, and show selector errors. Executed script effects require reload.
+- Blocking uses session rules that apply on every site except ignored domains.
+  Each rule has its own checkbox, and the master switch applies instantly.
+  Existing dynamic rules are migrated to session rules.
+  The popup reports Chrome validation, installation, limits, and disable state.
+- Global checks preflight user-script access; checks run single-flight with stale
+  results discarded. Cookie decoding falls back to raw malformed values.
+- Import and export stay settings-only (the plain settings object, as before).
+  Site overrides are not part of backups; the P2 item below was declined.
+- Privacy documentation covers Sync, local and session retention, URL redaction,
+  and each retained permission. Redundant `tabs` and `activeTab` were removed.
+
+The original problem descriptions and acceptance criteria follow for reference.
+
 ## P0: Make Network Tracking Atomic Across Concurrent Requests
 
 **Problem:** `webRequest` callbacks update the same per-tab state asynchronously. Two requests that finish together can read the same old state and overwrite each other. A late event from the previous navigation can also appear in the new page's history.

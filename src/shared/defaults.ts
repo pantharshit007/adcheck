@@ -22,13 +22,41 @@ namespace AdCheckShared {
 			windowGlobals: [],
 			blockedRoutesEnabled: true,
 			blockedRoutes: [],
+			displayNames: {},
 		};
+
+	export const LABELED_SECTIONS: readonly LabeledSectionKey[] = ["attributes", "cookies", "localStorageKeys"];
+
+	export function isLabeledSection(key: string): key is LabeledSectionKey {
+		return (LABELED_SECTIONS as readonly string[]).includes(key);
+	}
+
+	export function getDisplayName(settings: Settings, section: LabeledSectionKey, value: string): string {
+		return settings.displayNames[section]?.[value] || value;
+	}
+
+	// Keep only non-empty names for entries that still exist and differ from the entry itself.
+	export function normalizeDisplayNames(value: unknown, settings: Pick<Settings, LabeledSectionKey>): DisplayNames {
+		const result: DisplayNames = {};
+		if (!value || typeof value !== "object" || Array.isArray(value)) return result;
+		for (const section of LABELED_SECTIONS) {
+			const names = (value as Record<string, unknown>)[section];
+			if (!names || typeof names !== "object" || Array.isArray(names)) continue;
+			const cleaned: Record<string, string> = {};
+			for (const entry of settings[section]) {
+				const name = (names as Record<string, unknown>)[entry];
+				if (typeof name === "string" && name.trim() && name.trim() !== entry) cleaned[entry] = name.trim();
+			}
+			if (Object.keys(cleaned).length) result[section] = cleaned;
+		}
+		return result;
+	}
 
 	export const SETTINGS_SECTIONS = [
 		{
 			key: "bundles",
 			title: "Bundle or script names",
-			description: "Tell AdCheck which ad scripts should load on the page.",
+			description: "Scripts that should load on the page. A name such as prebid or gpt.js matches any script whose address contains it. Advanced: filename:exact.js, url:text (includes query), or regex:pattern.",
 			placeholder: "e.g. adscript.js",
 		},
 		{
@@ -85,6 +113,7 @@ namespace AdCheckShared {
 			windowGlobals: DEFAULT_SETTINGS.windowGlobals.map((entry) => ({ ...entry })),
 			blockedRoutesEnabled: DEFAULT_SETTINGS.blockedRoutesEnabled,
 			blockedRoutes: DEFAULT_SETTINGS.blockedRoutes.map((entry) => ({ ...entry })),
+			displayNames: {},
 		};
 	}
 
@@ -94,7 +123,7 @@ namespace AdCheckShared {
 			return defaults;
 		}
 
-		return {
+		const merged: Settings = {
 			enabled: typeof candidate.enabled === "boolean" ? candidate.enabled : defaults.enabled,
 			widgetCollapsed:
 				typeof candidate.widgetCollapsed === "boolean"
@@ -120,7 +149,10 @@ namespace AdCheckShared {
 				(candidate as Record<string, unknown>).blockedRoutes,
 				defaults.blockedRoutes,
 			),
+			displayNames: {},
 		};
+		merged.displayNames = normalizeDisplayNames(candidate.displayNames, merged);
+		return merged;
 	}
 
 	export function normalizeEntries(value: unknown, fallback: string[] = []): string[] {
@@ -214,6 +246,7 @@ namespace AdCheckShared {
 		return /[|()[\]{}+*$^\\]/.test(value);
 	}
 
+
 	export function tabStateStorageKey(tabId: number): string {
 		return `${TAB_STATE_PREFIX}${tabId}`;
 	}
@@ -305,9 +338,11 @@ namespace AdCheckShared {
 				continue;
 			}
 
+			const label = typeof candidate.label === "string" ? candidate.label.trim() : "";
 			entries.push({
 				path,
 				awaitBundle: typeof candidate.awaitBundle === "string" ? candidate.awaitBundle.trim() : "",
+				...(label && label !== path ? { label } : {}),
 			});
 		}
 
@@ -354,4 +389,39 @@ namespace AdCheckShared {
 
 		return entries;
 	}
+  // Bare names keep the original, forgiving behaviour: a case-insensitive match
+  // anywhere in the host and path (for example "apinstreambundle" matches
+  // ".../apinstreambundle.js"). Query strings and fragments are ignored so a
+  // parameter such as "?lib=gpt.js" cannot satisfy a check.
+  export function matchesBundle(pattern: string, url: string, resourceType: string): boolean {
+    if (resourceType !== "script") return false;
+    try {
+      if (pattern.startsWith("regex:")) return new RegExp(pattern.slice(6)).test(url);
+      if (pattern.startsWith("url:")) return url.toLowerCase().includes(pattern.slice(4).toLowerCase());
+      const parsed = new URL(url);
+      if (pattern.startsWith("filename:")) {
+        return parsed.pathname.split("/").pop()?.toLowerCase() === pattern.slice(9).toLowerCase();
+      }
+      return `${parsed.host}${parsed.pathname}`.toLowerCase().includes(pattern.toLowerCase());
+    } catch { return false; }
+  }
+
+  export function redactRequestUrl(value: string): string {
+    try { const url = new URL(value); return url.origin + url.pathname; }
+    catch { return ""; }
+  }
+
+  export function parseCookieString(value: string): Map<string, string> {
+    const result = new Map<string, string>();
+    for (const pair of value.split(";")) {
+      const index = pair.indexOf("=");
+      if (index < 0) continue;
+      const name = pair.slice(0, index).trim();
+      const raw = pair.slice(index + 1).trim();
+      try { result.set(name, decodeURIComponent(raw)); }
+      catch { result.set(name, raw); }
+    }
+    return result;
+  }
+
 }

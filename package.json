@@ -1,6 +1,6 @@
 {
 	"name": "adcheck-extension",
-	"version": "1.1.7",
+	"version": "1.1.8",
 	"private": true,
 	"description": "AdCheck Chrome extension for validating ad tag implementations on publisher websites.",
 	"scripts": {
@@ -8,7 +8,8 @@
 		"build": "tsc && node scripts/copy-static.mjs",
 		"generate:icons": "node scripts/generate-icons.mjs",
 		"prepackage": "npm run build",
-		"package": "node scripts/package-extension.mjs"
+		"package": "node scripts/package-extension.mjs",
+		"test": "node --test tests/*.test.mjs"
 	},
 	"devDependencies": {
 		"chrome-types": "^0.1.376",

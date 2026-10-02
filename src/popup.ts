@@ -149,9 +149,10 @@
 		});
 
 		exportButton.addEventListener("click", () => {
-			exportSettings();
+			void exportSettings();
 		});
 
+		importExportInput.addEventListener("input", previewBackup);
 		importFileButton.addEventListener("click", () => {
 			importFileInput.click();
 		});
@@ -218,7 +219,7 @@
 			return;
 		}
 
-		siteOverrideSiteLabel!.textContent = `Saved separately for ${popupState.activeSite.hostname}. These overrides do not affect import or export settings.`;
+		siteOverrideSiteLabel!.textContent = `Saved on this device for ${popupState.activeSite.hostname} and not included in exports. Script side effects require a page reload to undo.`;
 		popupState.pickedSelection = await loadSiteSelection(popupState.activeSite.hostname);
 		const override = await loadSiteOverride(popupState.activeSite.hostname);
 		hydrateSiteOverridePanel(override, popupState.pickedSelection);
@@ -350,31 +351,35 @@
 		}
 
 		popupState.pickedSelection = await loadSiteSelection(popupState.activeSite.hostname);
-		const selector = popupState.pickedSelection?.selector?.trim();
-		const htmlSnippet = siteOverrideSnippetInput.value.trim();
+		const overrides = await loadSiteOverrides();
+		const hostname = popupState.activeSite.hostname;
+		const existingOverride = overrides.find((entry) => entry.hostname === hostname);
+		const enabled = siteOverrideEnabledInput.checked;
+		// A fresh pick wins; otherwise keep the element the saved override already targets,
+		// so toggling or editing the snippet does not require re-picking.
+		const selector = popupState.pickedSelection?.selector?.trim() || existingOverride?.selector || "";
+		const htmlSnippet = siteOverrideSnippetInput.value.trim() || (enabled ? "" : existingOverride?.htmlSnippet ?? "");
 
-		if (!selector) {
-			showStatus("Pick a page element first.");
-			return;
-		}
-
-		if (!htmlSnippet) {
-			showStatus("Paste the tag snippet before saving.");
+		if (!selector || !htmlSnippet) {
+			if (!enabled && !existingOverride) {
+				showStatus("Override is off. Nothing is saved for this website.");
+				return;
+			}
+			showStatus(!selector ? "Pick a page element first." : "Paste the tag snippet before saving.");
 			return;
 		}
 
 		await refreshUserScriptWarning();
 
 		const nextOverride: SiteOverrideRule = {
-			hostname: popupState.activeSite.hostname,
+			hostname,
 			selector,
 			placement: AdCheckShared.normalizePlacement(siteOverridePlacementSelect.value),
 			htmlSnippet,
-			enabled: siteOverrideEnabledInput.checked,
+			enabled,
 			updatedAt: Date.now(),
 		};
 
-		const overrides = await loadSiteOverrides();
 		const remainingOverrides = overrides.filter(
 			(entry) => entry.hostname !== nextOverride.hostname,
 		);
@@ -383,9 +388,11 @@
 			[AdCheckShared.SITE_OVERRIDE_STORAGE_KEY]: remainingOverrides,
 		});
 
-		renderPickedSelection(popupState.pickedSelection);
+		renderPickedSelection(popupState.pickedSelection ?? selectorToSelection(selector));
 		showStatus(
-			hasInlineScript(htmlSnippet) && popupState.userScriptStatus?.available === false
+			!enabled
+				? "Site override turned off for this website."
+				: hasInlineScript(htmlSnippet) && popupState.userScriptStatus?.available === false
 				? "Saved, but inline scripts still need the user-script permission warning resolved below."
 				: "Site override saved for this website.",
 		);
@@ -485,10 +492,12 @@
 			siteOverrideSnippetInput?.value ?? "",
 		);
 		const isPermissionUnavailable = popupState.userScriptStatus?.available === false;
+    const globalWarning = document.getElementById("globalPermissionWarning");
+    if (globalWarning) globalWarning.textContent = isPermissionUnavailable && collectSettingsFromForm().windowGlobals.length ? (popupState.userScriptStatus?.message ?? "Window global inspection requires Allow User Scripts.") : "";
 
 		siteOverridePermissionMessage.classList.remove("is-warning");
 
-		if (!hasInlineScriptSnippet || !isPermissionUnavailable) {
+		if ((!hasInlineScriptSnippet && collectSettingsFromForm().windowGlobals.length === 0) || !isPermissionUnavailable) {
 			siteOverridePermissionMessage.classList.add("is-hidden");
 			siteOverridePermissionMessage.textContent = "";
 			return;
@@ -595,14 +604,21 @@
 		const blockedRoutesSection = renderBlockedRoutesSection(settings);
 		formRoot.innerHTML =
 			before.map((s) => renderSection(s, settings)).join("") +
-			windowGlobalsSection +
+			windowGlobalsSection + '<p id="globalPermissionWarning" role="alert"></p>' +
 			beforeBlockedRoutes.map((s) => renderSection(s, settings)).join("") +
 			blockedRoutesSection +
 			afterBlockedRoutes.map((s) => renderSection(s, settings)).join("");
 
+		void refreshBlockingStatus();
+		void refreshUserScriptWarning();
 		bindSectionActions();
 		bindBlockedRouteActions();
 		bindWindowGlobalsActions();
+		formRoot.oninput = (event) => {
+			const target = event.target as HTMLElement | null;
+			if (target instanceof HTMLInputElement && (target.hasAttribute("data-wg-path") || target.hasAttribute("data-section-key"))) target.title = target.value;
+			renderUserScriptWarning();
+		};
 		renderIgnoreSiteControl(settings);
 	}
 
@@ -687,21 +703,7 @@
 		// Always start collapsed on open — user clicks to expand
 		const startExpanded = false;
 		const rows = (values.length > 0 ? values : [""])
-			.map(
-				(value, index) => `
-          <div class="adcheck-entry-row">
-            <input
-              class="adcheck-entry-input"
-              type="text"
-              value="${escapeHtml(value)}"
-              placeholder="${escapeHtml(section.placeholder)}"
-              data-section-key="${section.key}"
-              data-entry-index="${index}"
-            />
-            <button class="adcheck-row-remove" type="button" data-remove-row="${section.key}" aria-label="Remove ${escapeHtml(section.title)} item">×</button>
-          </div>
-        `,
-			)
+			.map((value) => renderEntryRow(section, value, settings))
 			.join("");
 
 		const itemCount = values.filter((v) => v.trim() !== "").length;
@@ -826,24 +828,44 @@
 			return;
 		}
 
-		const wrapper = document.createElement("div");
-		wrapper.className = "adcheck-entry-row";
-		wrapper.innerHTML = `
-      <input
-        class="adcheck-entry-input"
-        type="text"
-        value=""
-        placeholder="${escapeHtml(section.placeholder)}"
-        data-section-key="${section.key}"
-      />
-      <button class="adcheck-row-remove" type="button" data-remove-row="${section.key}" aria-label="Remove ${escapeHtml(section.title)} item">×</button>
-    `;
+		const template = document.createElement("div");
+		template.innerHTML = renderEntryRow(section, "", null);
+		const wrapper = template.firstElementChild as HTMLDivElement | null;
+		if (!wrapper) {
+			return;
+		}
 
 		list.appendChild(wrapper);
 		wrapper.querySelector<HTMLInputElement>(".adcheck-entry-input")?.focus();
 		wrapper.querySelector<HTMLButtonElement>("[data-remove-row]")?.addEventListener("click", () => {
 			removeRow(wrapper.querySelector<HTMLButtonElement>("[data-remove-row]"));
 		});
+	}
+
+	function renderEntryRow(section: SettingsSection, value: string, settings: Settings | null): string {
+		const labeled = AdCheckShared.isLabeledSection(section.key);
+		const name = labeled && settings ? settings.displayNames[section.key]?.[value] ?? "" : "";
+		return `
+      <div class="adcheck-entry-row${labeled ? " has-display-name" : ""}">
+        <input
+          class="adcheck-entry-input"
+          type="text"
+          value="${escapeHtml(value)}"
+          title="${escapeHtml(value)}"
+          placeholder="${escapeHtml(section.placeholder)}"
+          data-section-key="${section.key}"
+        />
+        <button class="adcheck-row-remove" type="button" data-remove-row="${section.key}" aria-label="Remove ${escapeHtml(section.title)} item">×</button>
+        ${labeled ? `<input
+          class="adcheck-entry-input adcheck-entry-display-name"
+          type="text"
+          value="${escapeHtml(name)}"
+          placeholder="Display name (optional)"
+          aria-label="Display name shown in the widget"
+          data-section-label="${section.key}"
+        />` : ""}
+      </div>
+    `;
 	}
 
 	function removeRow(button: HTMLButtonElement | null): void {
@@ -902,60 +924,46 @@
 			return;
 		}
 
-		const nextSettings = parseImportedSettings(importExportInput.value);
-		if (!nextSettings) {
-			showStatus("Invalid JSON settings.");
-			return;
-		}
+    const settings = parseBackup(importExportInput.value);
+    if (!settings) { showStatus("Invalid JSON settings."); return; }
+    await persistSettings(settings, "Imported settings applied.");
+  }
 
-		renderSettingsForm(nextSettings);
-		await persistSettings(nextSettings, "Imported settings applied.");
-	}
+  async function importSettingsFromFile(): Promise<void> {
+    const file = importFileInput?.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    importFileInput!.value = "";
+    importExportInput!.value = text;
+    setImportEditorVisible(true);
+    previewBackup();
+  }
 
-	async function importSettingsFromFile(): Promise<void> {
-		if (!importFileInput) {
-			return;
-		}
+  // Backups are the plain settings object; site overrides are never exported.
+  function parseBackup(text: string): Settings | null {
+    try {
+      const raw = JSON.parse(text);
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+      return AdCheckShared.mergeSettings(raw);
+    } catch { return null; }
+  }
 
-		const file = importFileInput.files?.[0];
-		if (!file) {
-			return;
-		}
+  function previewBackup(): void {
+    const preview = document.getElementById("importPreview");
+    const text = importExportInput?.value.trim() ?? "";
+    if (preview) preview.textContent = !text || parseBackup(text) ? "" : "Invalid JSON settings.";
+  }
 
-		const text = await file.text();
-		const nextSettings = parseImportedSettings(text);
-		importFileInput.value = "";
-
-		if (!nextSettings) {
-			showStatus("Selected file has invalid JSON.");
-			return;
-		}
-
-		setImportEditorVisible(true);
-		renderSettingsForm(nextSettings);
-		await persistSettings(nextSettings, `Imported ${file.name}.`);
-	}
-
-	function exportSettings(): void {
-		const settings = collectSettingsFromForm();
-		const serialized = serializeSettings(settings);
-
-		if (importExportInput) {
-			importExportInput.value = serialized;
-			setImportEditorVisible(true);
-			importExportInput.select();
-		}
-
-		const blob = new Blob([serialized], { type: "application/json" });
-		const url = URL.createObjectURL(blob);
-		const anchor = document.createElement("a");
-		anchor.href = url;
-		anchor.download = "adcheck-settings.json";
-		anchor.click();
-		URL.revokeObjectURL(url);
-
-		showStatus("Settings exported.");
-	}
+  async function exportSettings(): Promise<void> {
+    const serialized = serializeSettings(collectSettingsFromForm());
+    importExportInput!.value = serialized;
+    setImportEditorVisible(true);
+    previewBackup();
+    const url = URL.createObjectURL(new Blob([serialized], {type: "application/json"}));
+    const anchor = document.createElement("a"); anchor.href = url; anchor.download = "adcheck-settings.json"; anchor.click();
+    URL.revokeObjectURL(url);
+    showStatus("Settings exported.");
+  }
 
 	function collectSettingsFromForm(): Settings {
 		const base = AdCheckShared.cloneDefaultSettings();
@@ -971,6 +979,7 @@
 			base.widgetSide = popupState.currentSettings.widgetSide;
 		}
 
+		const displayNames: Record<string, Record<string, string>> = {};
 		for (const section of AdCheckShared.SETTINGS_SECTIONS) {
 			const inputs = Array.from(
 				document.querySelectorAll<HTMLInputElement>(`input[data-section-key="${section.key}"]`),
@@ -979,7 +988,18 @@
 				inputs.map((input) => input.value),
 				[],
 			);
+			if (!AdCheckShared.isLabeledSection(section.key)) {
+				continue;
+			}
+			const names: Record<string, string> = {};
+			for (const input of inputs) {
+				const value = input.value.trim();
+				const name = input.closest(".adcheck-entry-row")?.querySelector<HTMLInputElement>("[data-section-label]")?.value.trim() ?? "";
+				if (value && name && !(value in names)) names[value] = name;
+			}
+			displayNames[section.key] = names;
 		}
+		base.displayNames = AdCheckShared.normalizeDisplayNames(displayNames, base);
 
 		base.windowGlobals = collectWindowGlobalsFromForm();
 		base.blockedRoutes = collectBlockedRoutesFromForm();
@@ -1023,19 +1043,6 @@
 		}
 
 		importExportInput.value = serializeSettings(settings);
-	}
-
-	function parseImportedSettings(value: string): Settings | null {
-		const trimmed = value.trim();
-		if (!trimmed) {
-			return null;
-		}
-
-		try {
-			return AdCheckShared.mergeSettings(JSON.parse(trimmed) as Partial<Settings>);
-		} catch {
-			return null;
-		}
 	}
 
 	function serializeSettings(settings: Settings): string {
@@ -1097,32 +1104,7 @@
 		const bundleOptions = settings.bundles.filter((b) => b.trim().length > 0);
 
 		const rows = (entries.length > 0 ? entries : [{ path: "", awaitBundle: "" }])
-			.map(
-				(entry, index) => `
-          <div class="adcheck-wg-entry-row" data-wg-row="${index}">
-            <input
-              class="adcheck-entry-input"
-              type="text"
-              value="${escapeHtml(entry.path)}"
-              placeholder="e.g. window._pbjsGlobals"
-              data-wg-path
-            />
-            <div class="adcheck-wg-select-wrapper">
-              <select class="adcheck-wg-select" data-wg-bundle>
-                <option value="">Immediately</option>
-                ${bundleOptions
-									.map(
-										(bundle) =>
-											`<option value="${escapeHtml(bundle)}"${entry.awaitBundle === bundle ? " selected" : ""}>${escapeHtml(bundle)}</option>`,
-									)
-									.join("")}
-              </select>
-              <span class="adcheck-wg-select-arrow" aria-hidden="true">›</span>
-            </div>
-            <button class="adcheck-row-remove" type="button" data-wg-remove aria-label="Remove window global">×</button>
-          </div>
-        `,
-			)
+			.map((entry, index) => `<div class="adcheck-wg-entry-row" data-wg-row="${index}">${renderWindowGlobalRowContent(entry, bundleOptions)}</div>`)
 			.join("");
 
 		return `
@@ -1173,7 +1155,8 @@
 		        <div class="adcheck-blocked-routes-master">
 		          <div>
 		            <p class="adcheck-inline-field-label">Enable route blocking</p>
-		            <p class="adcheck-field-help">Disabled rules stay saved but do not block requests.</p>
+		            <p class="adcheck-field-help">Blocks matching requests (scripts, calls, images; never the page itself) on every site. Uncheck a rule to stop it. The switch takes effect immediately; rule edits apply when you Save. Pausing AdCheck or ignoring a site disables blocking there. Plain text is a Chrome URL filter (supports *, | and ^) and ignores case. For a regex, use /pattern/ (case-sensitive), /pattern/i, or regex:pattern (ignores case).</p>
+                <p id="blockingStatus" role="status"></p>
 		          </div>
 		          <label class="adcheck-toggle adcheck-override-toggle" aria-label="Enable route blocking">
 		            <input id="blockedRoutesToggle" type="checkbox" ${settings.blockedRoutesEnabled ? "checked" : ""} />
@@ -1200,8 +1183,9 @@
 		    <label class="adcheck-blocked-route-checkbox" aria-label="Enable blocked route">
 		      <input type="checkbox" data-blocked-route-enabled ${entry.enabled ? "checked" : ""} />
 		    </label>
-		    <input class="adcheck-entry-input adcheck-blocked-route-input" type="text" value="${escapeHtml(entry.value)}" placeholder="e.g. /ads\/|tracking" data-blocked-route-value />
-		    <button class="adcheck-row-remove" type="button" data-blocked-route-remove aria-label="Remove blocked route">×</button>
+		    <input class="adcheck-entry-input adcheck-blocked-route-input" type="text" value="${escapeHtml(entry.value)}" placeholder="e.g. ads.js or /ads\/|tracking/i" data-blocked-route-value />
+		    <span data-blocked-route-status role="status">${entry.value.trim() ? "Checking…" : ""}</span>
+            <button class="adcheck-row-remove" type="button" data-blocked-route-remove aria-label="Remove blocked route">×</button>
 		  </div>
 		`;
 	}
@@ -1212,6 +1196,10 @@
 			return;
 		}
 
+    // The master toggle applies instantly and saves only its own value, so any other
+    // unsaved edits in the form stay unsaved.
+    const toggle = document.getElementById("blockedRoutesToggle") as HTMLInputElement | null;
+    if (toggle) toggle.onchange = () => { void setRouteBlockingEnabled(toggle); };
 		const addButton = formRoot?.querySelector<HTMLButtonElement>("[data-blocked-route-add]");
 		if (addButton) {
 			addButton.addEventListener("click", (event) => {
@@ -1230,6 +1218,8 @@
 		for (const input of Array.from(blockedRoutesList.querySelectorAll<HTMLInputElement>("[data-blocked-route-value]"))) {
 			input.addEventListener("input", () => {
 				persistBlockedRoutesState();
+        const label = input.closest("[data-blocked-route-row]")?.querySelector("[data-blocked-route-status]");
+        if (label) label.textContent = "Unsaved; save to validate and install.";
 			});
 		}
 
@@ -1258,6 +1248,41 @@
 		bindBlockedRouteActions();
 		row.querySelector<HTMLInputElement>("[data-blocked-route-value]")?.focus();
 	}
+
+  async function setRouteBlockingEnabled(toggle: HTMLInputElement): Promise<void> {
+    const enabled = toggle.checked;
+    toggle.disabled = true;
+    try {
+      const stored = await loadSettings();
+      stored.blockedRoutesEnabled = enabled;
+      await chrome.storage.sync.set({[AdCheckShared.STORAGE_KEY]: stored});
+      if (popupState.currentSettings) popupState.currentSettings.blockedRoutesEnabled = enabled;
+      await refreshBlockingStatus();
+      showStatus(enabled ? "Route blocking turned on." : "Route blocking turned off. Nothing is blocked.");
+    } catch (error: unknown) {
+      toggle.checked = !enabled;
+      showStatus(isExtensionContextInvalidatedError(error) ? "Extension reloaded. Reopen the popup." : "Could not change route blocking. Try again.");
+    } finally {
+      toggle.disabled = false;
+    }
+  }
+
+  async function refreshBlockingStatus(): Promise<void> {
+    try {
+      const response = await chrome.runtime.sendMessage({type: "SYNC_BLOCKED_ROUTE_RULES"}) as {installedCount?: number; statuses?: {value: string; state: string; message: string}[]};
+      const summary = document.getElementById("blockingStatus");
+      const installed = response.installedCount ?? 0;
+      if (summary) summary.textContent = `${installed} ${installed === 1 ? "rule" : "rules"} active in Chrome.`;
+      const labels: Record<string, string> = {installed: "Active", saved: "Saved", disabled: "Off", invalid: "Invalid", "omitted-due-to-limit": "Skipped"};
+      for (const row of Array.from(document.querySelectorAll<HTMLElement>("[data-blocked-route-row]"))) {
+        const value = row.querySelector<HTMLInputElement>("[data-blocked-route-value]")?.value.trim();
+        const status = response.statuses?.find(item => item.value === value);
+        const label = row.querySelector<HTMLElement>("[data-blocked-route-status]");
+        if (label && status) { label.textContent = `${labels[status.state] ?? status.state}: ${status.message}`; label.dataset.state = status.state; }
+        else if (label && !value) label.textContent = "";
+      }
+    } catch { const summary = document.getElementById("blockingStatus"); if (summary) summary.textContent = "Could not verify installed blocking rules."; }
+  }
 
 	function persistBlockedRoutesState(): void {
 		const settings = collectSettingsFromForm();
@@ -1338,25 +1363,7 @@
 		const bundleOptions = getCurrentBundleOptions();
 		const wrapper = document.createElement("div");
 		wrapper.className = "adcheck-wg-entry-row";
-		wrapper.innerHTML = `
-      <input
-        class="adcheck-entry-input"
-        type="text"
-        value=""
-        placeholder="e.g. window._pbjsGlobals"
-        data-wg-path
-      />
-      <div class="adcheck-wg-select-wrapper">
-        <select class="adcheck-wg-select" data-wg-bundle>
-          <option value="">Immediately</option>
-          ${bundleOptions
-						.map((bundle) => `<option value="${escapeHtml(bundle)}">${escapeHtml(bundle)}</option>`)
-						.join("")}
-        </select>
-        <span class="adcheck-wg-select-arrow" aria-hidden="true">›</span>
-      </div>
-      <button class="adcheck-row-remove" type="button" data-wg-remove aria-label="Remove window global">×</button>
-    `;
+		wrapper.innerHTML = renderWindowGlobalRowContent({ path: "", awaitBundle: "" }, bundleOptions);
 
 		list.appendChild(wrapper);
 		wrapper.querySelector<HTMLInputElement>("[data-wg-path]")?.focus();
@@ -1393,13 +1400,47 @@
 				continue;
 			}
 
+			const label = row.querySelector<HTMLInputElement>("[data-wg-label]")?.value.trim() ?? "";
 			entries.push({
 				path,
 				awaitBundle: bundleSelect?.value.trim() ?? "",
+				...(label && label !== path ? { label } : {}),
 			});
 		}
 
 		return entries;
+	}
+
+	function renderWindowGlobalRowContent(entry: AdCheckShared.WindowGlobalEntry, bundleOptions: string[]): string {
+		return `
+      <input
+        class="adcheck-entry-input adcheck-wg-path"
+        type="text"
+        value="${escapeHtml(entry.path)}"
+        title="${escapeHtml(entry.path)}"
+        placeholder="e.g. window._pbjsGlobals"
+        aria-label="Window global path"
+        data-wg-path
+      />
+      <div class="adcheck-wg-select-wrapper">
+        <select class="adcheck-wg-select" data-wg-bundle aria-label="When to read">
+          <option value="">Immediately</option>
+          ${bundleOptions
+						.map((bundle) => `<option value="${escapeHtml(bundle)}"${entry.awaitBundle === bundle ? " selected" : ""}>After ${escapeHtml(bundle)}</option>`)
+						.join("")}
+        </select>
+        <span class="adcheck-wg-select-arrow" aria-hidden="true">›</span>
+      </div>
+      <button class="adcheck-row-remove" type="button" data-wg-remove aria-label="Remove window global">×</button>
+      <input
+        class="adcheck-entry-input adcheck-wg-label"
+        type="text"
+        value="${escapeHtml(entry.label ?? "")}"
+        placeholder="Display name (optional), e.g. Section ID"
+        aria-label="Display name shown in the widget"
+        data-wg-label
+      />
+    `;
 	}
 
 	function getCurrentBundleOptions(): string[] {

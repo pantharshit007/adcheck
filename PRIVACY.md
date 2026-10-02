@@ -1,31 +1,58 @@
 # AdCheck Privacy Policy
 
-Last updated: May 5, 2026
+Last updated: September 27, 2026
 
-## Summary
+AdCheck sends no data to an AdCheck-controlled service and uses no analytics.
+It inspects pages to perform the checks you configure.
 
-AdCheck does not collect, transmit, sell, or share personal data. The extension stores user settings locally in the browser using Chrome storage APIs.
+## Storage and retention
 
-## Data Collection
+- **Chrome Sync:** check names and patterns, ignored domains, blocking settings,
+  and widget preferences remain until you change or clear them. Chrome may sync
+  these settings through your Google account when Chrome Sync is enabled.
+- **Local extension storage:** hostname-specific selectors and override snippets
+  remain until deleted or the extension is uninstalled. They and picker
+  selections stay on this device and are never included in backups.
+- **Session storage and worker memory:** up to 200 completed script requests per
+  tab (scripts matching your checks are kept first) plus script requests still in
+  flight, while at least one bundle check is configured. Non-script requests are
+  never retained. History clears on
+  navigation, tab closure, tracking-setting changes, or the end of Chrome's session
+  (including extension reload). Session storage preserves it across service-worker
+  suspension. Writes and page notifications are batched at most once per 100 ms
+  per active tab; pausing cancels queued writes and clears tracked state. Legacy
+  unredacted session history from older versions is discarded on worker startup.
+- **Page memory:** visible check results can contain cookie values, local-storage
+  values, and inspected globals. They disappear when the page is closed or
+  reloaded; they are not included in configuration backups.
 
-We do not collect personal information or browsing history.
+Network matching briefly uses the original URL. Retained and displayed URLs omit
+credentials, query strings, and fragments. Paths, status codes, resource types,
+matched check names, and durations are retained for diagnosis. Paths and configured
+patterns can themselves contain identifiers, so choose them accordingly.
 
-The extension may store:
+## Backups and user-provided scripts
 
-- Enabled or disabled state
-- Configuration preferences
-- Site-specific override settings
-
-This data remains on your device unless you choose to export or share it.
+Exports contain only Chrome Sync settings, as ordinary files under your control,
+without site overrides, network history, or picker state. Imports apply settings
+only. Treat override snippets as executable code: injected scripts
+can make network requests and interact with the publisher page. External script
+fallback loading may fetch a URL you configured. This is distinct from AdCheck
+sending telemetry. Removing an override removes its tracked markup; already-run
+script effects require reloading the page.
 
 ## Permissions
 
-AdCheck requests browser permissions only to inspect and validate ad tag behavior on the current page.
+- `storage`: save synced settings and local overrides, and retain temporary redacted request history.
+- `webRequest`: observe script starts, responses, and failures.
+- `userScripts`: execute configured override scripts and inspect window globals in
+  the page context, with Chrome's user-script access enabled.
+- `declarativeNetRequest`: install your blocking rules. They apply to subresources
+  on every site; pause and ignored domains disable them. The popup's route-blocking
+  switch turns all blocking off immediately.
+- HTTP/HTTPS host access: inject the widget, observe requests, inspect page context,
+  fetch configured external scripts, and read eligible tab URLs for site scope.
+  Separate `tabs` and `activeTab` permissions are unnecessary with this host access
+  and have been removed.
 
-## Third Parties
-
-AdCheck does not send data to third-party services. It also does not use remote code.
-
-## Contact
-
-If you have questions about this policy, contact the publisher of AdCheck through the project repository.
+Questions can be directed to the publisher through the project repository.

@@ -28,6 +28,8 @@ declare namespace AdCheckShared {
   interface WindowGlobalEntry {
     path: string;
     awaitBundle: string;
+    /** Optional short name shown in the widget instead of the full path. */
+    label?: string;
   }
 
   interface Settings {
@@ -44,7 +46,12 @@ declare namespace AdCheckShared {
     windowGlobals: WindowGlobalEntry[];
     blockedRoutesEnabled: boolean;
     blockedRoutes: BlockedRouteEntry[];
+    /** Optional short names shown in the widget, keyed by section and then by entry. */
+    displayNames: DisplayNames;
   }
+
+  type LabeledSectionKey = "attributes" | "cookies" | "localStorageKeys";
+  type DisplayNames = Partial<Record<LabeledSectionKey, Record<string, string>>>;
 
   interface BlockedRouteEntry {
     value: string;
@@ -60,9 +67,12 @@ declare namespace AdCheckShared {
     loadTimeMs: number | null;
     status: "completed" | "error";
     error?: string;
+    statusCode?: number;
+    matchedChecks?: string[];
   }
 
   interface ActiveNetworkRequest {
+    matchedChecks?: string[];
     url: string;
     requestId: string;
     resourceType: string;
@@ -83,6 +93,8 @@ declare namespace AdCheckShared {
     detail: string;
     detailIsHtml?: boolean;
     failureMessage?: string;
+    /** The configured name when `label` is a custom display name. */
+    sourceName?: string;
   }
 
   interface BundleCheckResult extends CheckResultBase {
