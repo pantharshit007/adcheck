@@ -10,6 +10,7 @@
 	type UserScriptStatus = AdCheckShared.UserScriptStatus;
 
 	interface ActiveSiteContext {
+		url: string;
 		hostname: string;
 		tabId: number;
 	}
@@ -437,6 +438,7 @@
 
 			return {
 				hostname: url.hostname.toLowerCase(),
+				url: url.href,
 				tabId: activeTab.id,
 			};
 		} catch {
@@ -640,7 +642,7 @@
 
 		const hostname = activeSite.hostname;
 		const ignoredEntry = settings.ignoredDomains.find((entry) =>
-			AdCheckShared.matchesIgnoredDomain(entry, hostname),
+			AdCheckShared.matchesIgnoredDomain(entry, hostname, activeSite.url),
 		);
 		const exactIgnored = settings.ignoredDomains.some(
 			(entry) => AdCheckShared.normalizeIgnoredDomain(entry) === hostname,
@@ -664,10 +666,11 @@
 			return;
 		}
 
-		const hostname = popupState.activeSite.hostname;
+		const activeSite = popupState.activeSite;
+		const hostname = activeSite.hostname;
 		const settings = collectSettingsFromForm();
 		const ignoredEntry = settings.ignoredDomains.find((entry) =>
-			AdCheckShared.matchesIgnoredDomain(entry, hostname),
+			AdCheckShared.matchesIgnoredDomain(entry, hostname, activeSite.url),
 		);
 		const exactIgnored = settings.ignoredDomains.some(
 			(entry) => AdCheckShared.normalizeIgnoredDomain(entry) === hostname,

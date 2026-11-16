@@ -93,7 +93,7 @@ namespace AdCheckShared {
 			key: "ignoredDomains",
 			title: "Ignored domains",
 			description:
-				"Skip AdCheck on matching hostnames. Supports both domain name and regex Exp.",
+				"Skip AdCheck by domain name (including subdomains), or use a regex to match the hostname or full page URL.",
 			placeholder: "example.com or google|github\\.com",
 		},
 	] as const;
@@ -174,11 +174,15 @@ namespace AdCheckShared {
 		return Array.from(unique);
 	}
 
-	export function matchesIgnoredDomain(entry: string, hostname: string): boolean {
+	export function matchesIgnoredDomain(entry: string, hostname: string, pageUrl: string): boolean {
 		const regex = parseIgnoredDomainRegex(entry);
 		if (regex) {
 			regex.lastIndex = 0;
-			return regex.test(hostname);
+			if (regex.test(hostname)) {
+				return true;
+			}
+			regex.lastIndex = 0;
+			return regex.test(pageUrl);
 		}
 
 		const normalizedDomain = normalizeIgnoredDomain(entry);

@@ -1732,7 +1732,7 @@
 		const hostname = window.location.hostname.toLowerCase();
 
 		return settings.ignoredDomains.some((entry) =>
-			AdCheckShared.matchesIgnoredDomain(entry, hostname),
+			AdCheckShared.matchesIgnoredDomain(entry, hostname, window.location.href),
 		);
 	}
 
