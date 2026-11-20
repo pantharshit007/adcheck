@@ -1084,9 +1084,13 @@
 				continue;
 			}
 			try {
-				const luminance = parseColorLuminance(window.getComputedStyle(candidate).backgroundColor);
+				const computed = window.getComputedStyle(candidate);
+				const luminance = parseColorLuminance(computed.backgroundColor);
 				if (luminance !== null) {
 					return luminance < 0.45;
+				}
+				if (computed.colorScheme === "dark") {
+					return true;
 				}
 			} catch {
 				// Ignore inaccessible computed styles.
@@ -1826,14 +1830,26 @@
 		return false;
 	}
 
-	function getDocumentTop(element: HTMLElement): number {
-		let top = 0;
-		let current: HTMLElement | null = element;
-		while (current) {
-			top += current.offsetTop;
-			current = current.offsetParent as HTMLElement | null;
+	function getUnstuckDocumentTop(element: HTMLElement, stickyElements: HTMLElement[]): number {
+		const previousPositions = stickyElements.map((el) => ({
+			el,
+			value: el.style.getPropertyValue("position"),
+			priority: el.style.getPropertyPriority("position"),
+		}));
+		try {
+			for (const el of stickyElements) {
+				el.style.setProperty("position", "relative", "important");
+			}
+			return element.getBoundingClientRect().top + window.scrollY;
+		} finally {
+			for (const item of previousPositions) {
+				if (item.value) {
+					item.el.style.setProperty("position", item.value, item.priority);
+				} else {
+					item.el.style.removeProperty("position");
+				}
+			}
 		}
-		return top;
 	}
 
 	async function navigateToDomId(domId: string): Promise<void> {
@@ -1862,20 +1878,17 @@
 
 		const scrollTarget = findScrollTarget(target);
 		const rect = scrollTarget.getBoundingClientRect();
-		const scrollTargetStyle = window.getComputedStyle(scrollTarget);
-		const hasStickyAncestor = (() => {
-			let cur: HTMLElement | null = scrollTarget;
-			while (cur && cur !== document.documentElement) {
-				if (window.getComputedStyle(cur).position === "sticky") {
-					return true;
-				}
-				cur = cur.parentElement;
+		const stickyElements: HTMLElement[] = [];
+		let cur: HTMLElement | null = scrollTarget;
+		while (cur && cur !== document.documentElement) {
+			if (window.getComputedStyle(cur).position === "sticky") {
+				stickyElements.push(cur);
 			}
-			return false;
-		})();
+			cur = cur.parentElement;
+		}
 
-		if ((hasStickyAncestor || scrollTargetStyle.position === "sticky") && !hasScrollableAncestor(scrollTarget)) {
-			const docTop = getDocumentTop(scrollTarget);
+		if (stickyElements.length > 0 && !hasScrollableAncestor(scrollTarget)) {
+			const docTop = getUnstuckDocumentTop(scrollTarget, stickyElements);
 			window.scrollTo({
 				top: Math.max(0, docTop - Math.round((window.innerHeight - rect.height) / 2)),
 				behavior: "smooth",

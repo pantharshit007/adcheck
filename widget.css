@@ -47,11 +47,14 @@
     top: 18px !important;
     right: 18px !important;
     left: auto !important;
+    width: auto !important;
+    max-width: none !important;
+    margin: 0 !important;
     z-index: 2147483647 !important;
-    font-family: var(--adcheck-font-body);
-    font-size: 14px;
-    line-height: 1.4;
-    color: var(--adcheck-ink);
+    font-family: var(--adcheck-font-body) !important;
+    font-size: 14px !important;
+    line-height: 1.4 !important;
+    color: var(--adcheck-ink) !important;
     color-scheme: light;
     pointer-events: none !important;
     -webkit-font-smoothing: antialiased;
