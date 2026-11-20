@@ -645,7 +645,7 @@
 			AdCheckShared.matchesIgnoredDomain(entry, hostname, activeSite.url),
 		);
 		const exactIgnored = settings.ignoredDomains.some(
-			(entry) => AdCheckShared.normalizeIgnoredDomain(entry) === hostname,
+			(entry) => isExactIgnoredDomain(entry, hostname),
 		);
 		const isManagedByPattern = Boolean(ignoredEntry) && !exactIgnored;
 
@@ -673,7 +673,7 @@
 			AdCheckShared.matchesIgnoredDomain(entry, hostname, activeSite.url),
 		);
 		const exactIgnored = settings.ignoredDomains.some(
-			(entry) => AdCheckShared.normalizeIgnoredDomain(entry) === hostname,
+			(entry) => isExactIgnoredDomain(entry, hostname),
 		);
 
 		if (ignoreSiteToggle.checked) {
@@ -686,7 +686,7 @@
 
 		if (exactIgnored) {
 			settings.ignoredDomains = settings.ignoredDomains.filter(
-				(entry) => AdCheckShared.normalizeIgnoredDomain(entry) !== hostname,
+				(entry) => !isExactIgnoredDomain(entry, hostname),
 			);
 			await persistSettings(settings, `${hostname} removed from ignored domains.`);
 			return;
@@ -698,6 +698,11 @@
 				? `This site is already ignored by ${ignoredEntry}. Remove that rule in Ignored domains to re-enable it.`
 				: "This site is already ignored.",
 		);
+	}
+
+	function isExactIgnoredDomain(entry: string, hostname: string): boolean {
+		return !AdCheckShared.parseIgnoredDomainRegex(entry) &&
+			AdCheckShared.normalizeIgnoredDomain(entry) === hostname;
 	}
 
 	// TODO 6: Move this to either separate file or better integrate the html with the TS stringliterals aren't great for this

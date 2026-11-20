@@ -36,6 +36,7 @@
 
 	const pageWindow = window as Window & {
 		__ADCHECK_BOOTSTRAPPED__?: boolean;
+		navigation?: EventTarget;
 	};
 
 	const ROOT_ID = "adcheck-root";
@@ -104,7 +105,17 @@
 
 	async function bootstrap(): Promise<void> {
 		await syncSiteOverride();
-		await applySettings(await loadSettings());
+		const settings = await loadSettings();
+
+		// The Navigation API also sees URL changes made by the page's History API.
+		pageWindow.navigation?.addEventListener("currententrychange", () => {
+			const shouldShow = state.settings.enabled && !shouldIgnoreCurrentPage(state.settings);
+			if (shouldShow !== Boolean(state.root)) {
+				void updateWidgetForCurrentPage();
+			}
+		});
+
+		await applySettings(settings);
 
 		chrome.runtime.onMessage.addListener((message: RuntimeMessage) => {
 			if (message.type === "NETWORK_ACTIVITY_UPDATED") {
@@ -593,12 +604,15 @@
 	}
 
 	async function applySettings(nextSettings: Settings): Promise<void> {
-		checkGeneration++;
 		state.settings = nextSettings;
+		await updateWidgetForCurrentPage();
+	}
 
-		if (!nextSettings.enabled || shouldIgnoreCurrentPage(nextSettings)) {
-			await updateActionSuccessState(false);
+	async function updateWidgetForCurrentPage(): Promise<void> {
+		checkGeneration++;
+		if (!state.settings.enabled || shouldIgnoreCurrentPage(state.settings)) {
 			teardownWidget();
+			await updateActionSuccessState(false);
 			return;
 		}
 
