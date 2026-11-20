@@ -12,9 +12,11 @@ window.chrome = {storage: {sync: area('sync'), local: area('local'), onChanged: 
 http.createServer((req,res) => {
   let body, type = 'text/javascript';
   if(req.url === '/popup') {type='text/html'; body=readFileSync('popup.html','utf8').replace('<script src="popup.js">','<script src="mock.js"></script><script src="popup.js">');}
-  else if(req.url === '/content') {type='text/html'; body='<html><head><link rel="stylesheet" href="/styles.css"></head><body><h1>Publisher fixture</h1><div id="slot">Ad slot</div><script src="/shared/defaults.js"></script><script src="/shared/build-info.js"></script><script src="/mock.js"></script><script src="/content.js"></script></body></html>';}
+  else if(req.url === '/content') {type='text/html'; body='<html><head><link rel="stylesheet" href="/page.css"></head><body><h1>Publisher fixture</h1><div id="slot">Ad slot</div><script src="/shared/defaults.js"></script><script src="/shared/build-info.js"></script><script src="/shared/widget-styles.js"></script><script src="/mock.js"></script><script src="/content.js"></script></body></html>';}
   else if(req.url === '/mock.js') body=mock;
   else if(req.url === '/styles.css') {type='text/css';body=readFileSync('styles.css','utf8');}
+  else if(req.url === '/page.css') {type='text/css';body=readFileSync('page.css','utf8');}
+  else if(req.url === '/shared/widget-styles.js') {body=`var AdCheckShared = AdCheckShared || {};\nAdCheckShared.WIDGET_CSS = ${JSON.stringify(readFileSync('widget.css','utf8'))};\n`;}
   else if(['/popup.js','/content.js','/shared/defaults.js','/shared/build-info.js'].includes(req.url)) body=compile('src'+req.url.replace(/\.js$/,'.ts'));
   else {res.writeHead(404);res.end();return;}
   res.writeHead(200, {'content-type': type});res.end(body);

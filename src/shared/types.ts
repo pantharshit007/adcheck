@@ -1,5 +1,6 @@
 declare namespace AdCheckShared {
   type CheckStatus = "pending" | "pass" | "fail";
+  type WidgetTheme = "auto" | "light" | "dark";
   type SiteOverridePlacement = "beforebegin" | "afterbegin" | "beforeend" | "afterend";
 
   interface SiteOverrideRule {
@@ -36,6 +37,7 @@ declare namespace AdCheckShared {
     enabled: boolean;
     widgetCollapsed: boolean;
     widgetSide: "left" | "right";
+    widgetTheme: WidgetTheme;
     bundles: string[];
     classNames: string[];
     domIds: string[];
@@ -167,4 +169,6 @@ declare namespace AdCheckShared {
     scriptUrl?: string;
     windowGlobalPaths?: string[];
   }
+
+  const WIDGET_CSS: string;
 }

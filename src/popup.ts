@@ -985,6 +985,7 @@
 		if (popupState.currentSettings) {
 			base.widgetCollapsed = popupState.currentSettings.widgetCollapsed;
 			base.widgetSide = popupState.currentSettings.widgetSide;
+			base.widgetTheme = popupState.currentSettings.widgetTheme;
 		}
 
 		const displayNames: Record<string, Record<string, string>> = {};

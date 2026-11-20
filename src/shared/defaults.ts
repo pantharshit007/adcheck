@@ -12,6 +12,7 @@ namespace AdCheckShared {
 			enabled: false,
 			widgetCollapsed: false,
 			widgetSide: "right",
+			widgetTheme: "auto",
 			bundles: ["script.js"],
 		classNames: [],
 		domIds: [],
@@ -93,7 +94,7 @@ namespace AdCheckShared {
 			key: "ignoredDomains",
 			title: "Ignored domains",
 			description:
-				"Skip AdCheck by domain name (including subdomains), or use a regex to match the hostname or full page URL.",
+				"Skip AdCheck by domain name (including subdomains), bare regex on the hostname, or /pattern/ / regex:pattern to match the full page URL.",
 			placeholder: "example.com or google|github\\.com",
 		},
 	] as const;
@@ -103,6 +104,7 @@ namespace AdCheckShared {
 			enabled: DEFAULT_SETTINGS.enabled,
 			widgetCollapsed: DEFAULT_SETTINGS.widgetCollapsed,
 			widgetSide: DEFAULT_SETTINGS.widgetSide,
+			widgetTheme: DEFAULT_SETTINGS.widgetTheme,
 			bundles: [...DEFAULT_SETTINGS.bundles],
 			classNames: [...DEFAULT_SETTINGS.classNames],
 			domIds: [...DEFAULT_SETTINGS.domIds],
@@ -130,6 +132,10 @@ namespace AdCheckShared {
 					? candidate.widgetCollapsed
 					: defaults.widgetCollapsed,
 			widgetSide: candidate.widgetSide === "left" ? "left" : defaults.widgetSide,
+			widgetTheme:
+				candidate.widgetTheme === "light" || candidate.widgetTheme === "dark" || candidate.widgetTheme === "auto"
+					? candidate.widgetTheme
+					: defaults.widgetTheme,
 			bundles: normalizeEntries(candidate.bundles, defaults.bundles),
 			classNames: normalizeEntries(candidate.classNames, defaults.classNames),
 			domIds: normalizeEntries(candidate.domIds, defaults.domIds),
@@ -175,17 +181,26 @@ namespace AdCheckShared {
 	}
 
 	export function matchesIgnoredDomain(entry: string, hostname: string, pageUrl: string): boolean {
-		const regex = parseIgnoredDomainRegex(entry);
+		const trimmed = entry.trim();
+		const regex = parseIgnoredDomainRegex(trimmed);
 		if (regex) {
 			regex.lastIndex = 0;
 			if (regex.test(hostname)) {
 				return true;
 			}
+			// Bare regex patterns (e.g. "google|youtube" or "(?:google|youtube)")
+			// match only the hostname so article slugs or query params like
+			// "?utm_source=google" don't falsely ignore unrelated websites.
+			// Explicit /pattern/ or regex:pattern rules test both hostname and full URL.
+			const isExplicitRegex = /^\/.+\/[dgimsuvy]*$/.test(trimmed) || trimmed.startsWith("regex:");
+			if (!isExplicitRegex) {
+				return false;
+			}
 			regex.lastIndex = 0;
 			return regex.test(pageUrl);
 		}
 
-		const normalizedDomain = normalizeIgnoredDomain(entry);
+		const normalizedDomain = normalizeIgnoredDomain(trimmed);
 		if (!normalizedDomain) {
 			return false;
 		}
