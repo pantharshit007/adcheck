@@ -11,8 +11,8 @@ AdCheck allows you to set up precise tracking for different items through the ma
 - **Cookie names**: Check the browser cookies your ad setup depends on (e.g., `user_id`), ensuring the user session or targeting is populated.
 - **Local storage keys**: Verify page storage keys such as session or targeting data.
 - **Ignored domains**: Skip AdCheck entirely on matching domains or URLs.
-  - **Plain domain** (e.g., `example.com`): Matches the domain and all of its subdomains (such as `www.example.com`).
-  - **Bare regex** (e.g., `google|github|youtube` or `google|github\.com`): Matches **only the hostname** (case-insensitive), so words in article paths or query parameters (like `?utm_source=google`) will not accidentally ignore unrelated websites.
-  - **Explicit URL regex** (`/pattern/`, `/pattern/i`, `regex:pattern`, or patterns containing `:`, `/`, `?`, or `#`): Matches against the **full page URL**, useful for ignoring specific paths or file types such as `/\.xml(?:\?.*)?$/i`.
+  - **Plain domain** (e.g., `example.com`): Matches the domain and all of its subdomains (such as `www.example.com`). Plain entries without regex syntax (even with a path like `example.com/admin`) are normalized to their hostname and match the whole domain.
+  - **Bare regex** (e.g., `google|github|youtube` or `(?:google|github)\.com`): Matches **only the hostname** (case-insensitive), so words in article paths or query parameters (like `?utm_source=google`) will not accidentally ignore unrelated websites.
+  - **Explicit URL regex** (`/pattern/`, `/pattern/i`, or `regex:pattern`): Tested against **both the hostname and the full-page URL** — a match against either ignores the page. Use this when you want to match specific paths or file types, such as `/example\.com\/admin/i` or `/\.xml(?:\?.*)?$/i`.
 - **Window Globals Inspector**: Safely inspect and track values from the page's `window` object. This supports deep-path access and "await bundle" dependencies to ensure data is checked only after certain scripts load.
 - **Blocked Routes**: Define network routes that AdCheck should block to simulate environments without certain scripts or network calls. This is useful for ad testing and validation.

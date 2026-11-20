@@ -188,13 +188,12 @@ namespace AdCheckShared {
 			if (regex.test(hostname)) {
 				return true;
 			}
-			// Bare regex patterns (e.g. "google|youtube") match only the hostname so
-			// article slugs or query params like "?utm_source=google" don't falsely
-			// ignore unrelated websites. Explicit /pattern/ or regex:pattern rules
-			// (or patterns referencing URL path/query syntax) still match the full URL.
+			// Bare regex patterns (e.g. "google|youtube" or "(?:google|youtube)")
+			// match only the hostname so article slugs or query params like
+			// "?utm_source=google" don't falsely ignore unrelated websites.
+			// Explicit /pattern/ or regex:pattern rules test both hostname and full URL.
 			const isExplicitRegex = /^\/.+\/[dgimsuvy]*$/.test(trimmed) || trimmed.startsWith("regex:");
-			const targetsUrlParts = /[:/?#]/.test(trimmed);
-			if (!isExplicitRegex && !targetsUrlParts) {
+			if (!isExplicitRegex) {
 				return false;
 			}
 			regex.lastIndex = 0;

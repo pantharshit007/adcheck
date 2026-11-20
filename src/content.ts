@@ -63,6 +63,7 @@
 		shadowRoot: ShadowRoot | null;
 		colorSchemeMedia: MediaQueryList | null;
 		colorSchemeListener: (() => void) | null;
+		pageThemeObserver: MutationObserver | null;
 		deadlineHandle: number | null;
 		pollHandle: number | null;
 		rowHints: Record<string, string>;
@@ -87,6 +88,7 @@
 		shadowRoot: null,
 		colorSchemeMedia: null,
 		colorSchemeListener: null,
+		pageThemeObserver: null,
 		deadlineHandle: null,
 		pollHandle: null,
 		rowHints: {},
@@ -1061,7 +1063,7 @@
 		}
 
 		const alpha = match[4] !== undefined ? Number.parseFloat(match[4]) : 1;
-		if (!Number.isFinite(alpha) || alpha <= 0.05) {
+		if (!Number.isFinite(alpha) || alpha < 0.5) {
 			return null;
 		}
 
@@ -1136,23 +1138,56 @@
 		};
 	}
 
-	function bindColorSchemeListener(): void {
-		unbindColorSchemeListener();
-		if (typeof window.matchMedia !== "function") {
+	function syncWidgetThemeDisplay(): void {
+		if (!state.root || !state.shadowRoot) {
 			return;
 		}
 
-		const media = window.matchMedia("(prefers-color-scheme: dark)");
-		const listener = () => {
-			if (state.settings.widgetTheme === "auto") {
-				renderWidget();
-			}
-		};
+		const resolvedTheme = resolveWidgetTheme(state.settings.widgetTheme);
+		state.root.dataset.theme = resolvedTheme;
+		const themeButton = state.shadowRoot.querySelector<HTMLButtonElement>("#adcheckThemeToggleButton");
+		if (themeButton) {
+			const meta = getThemeButtonMeta(state.settings.widgetTheme, resolvedTheme);
+			themeButton.textContent = meta.icon;
+			themeButton.title = meta.label;
+			themeButton.setAttribute("aria-label", meta.label);
+		}
+	}
 
-		if (typeof media.addEventListener === "function") {
-			media.addEventListener("change", listener);
-			state.colorSchemeMedia = media;
-			state.colorSchemeListener = listener;
+	function bindColorSchemeListener(): void {
+		unbindColorSchemeListener();
+		if (typeof window.matchMedia === "function") {
+			const media = window.matchMedia("(prefers-color-scheme: dark)");
+			const listener = () => {
+				if (state.settings.widgetTheme === "auto") {
+					syncWidgetThemeDisplay();
+				}
+			};
+
+			if (typeof media.addEventListener === "function") {
+				media.addEventListener("change", listener);
+				state.colorSchemeMedia = media;
+				state.colorSchemeListener = listener;
+			}
+		}
+
+		if (typeof MutationObserver !== "undefined") {
+			const observer = new MutationObserver(() => {
+				if (state.settings.widgetTheme === "auto") {
+					syncWidgetThemeDisplay();
+				}
+			});
+			const options: MutationObserverInit = {
+				attributes: true,
+				attributeFilter: ["class", "style", "data-theme", "data-color-scheme"],
+			};
+			if (document.documentElement) {
+				observer.observe(document.documentElement, options);
+			}
+			if (document.body) {
+				observer.observe(document.body, options);
+			}
+			state.pageThemeObserver = observer;
 		}
 	}
 
@@ -1162,6 +1197,8 @@
 		}
 		state.colorSchemeMedia = null;
 		state.colorSchemeListener = null;
+		state.pageThemeObserver?.disconnect();
+		state.pageThemeObserver = null;
 	}
 
 	function ensureWidget(): void {
@@ -1171,6 +1208,7 @@
 
 		const host = document.createElement("div");
 		host.id = ROOT_ID;
+		host.style.setProperty("position", "fixed", "important");
 		const shadow = host.attachShadow({ mode: "open" });
 		attachWidgetStyles(shadow);
 
@@ -1558,6 +1596,9 @@
 		state.shadowRoot.addEventListener("pointerout", handleInfoTooltipEvent);
 		state.shadowRoot.addEventListener("focusin", handleInfoTooltipEvent);
 		state.shadowRoot.addEventListener("focusout", handleInfoTooltipEvent);
+		state.shadowRoot
+			.querySelector<HTMLElement>(".adcheck-widget-shell")
+			?.addEventListener("scroll", scheduleInfoTooltipReposition, { passive: true });
 		window.addEventListener("scroll", scheduleInfoTooltipReposition, true);
 		window.addEventListener("resize", scheduleInfoTooltipReposition);
 	}
@@ -1680,6 +1721,14 @@
 		}
 
 		const targetRect = target.getBoundingClientRect();
+		const shell = state.shadowRoot?.querySelector<HTMLElement>(".adcheck-widget-shell");
+		if (shell) {
+			const shellRect = shell.getBoundingClientRect();
+			if (targetRect.bottom < shellRect.top || targetRect.top > shellRect.bottom) {
+				hideInfoTooltip();
+				return;
+			}
+		}
 		const tooltipRect = tooltipEl.getBoundingClientRect();
 		const viewportWidth = window.innerWidth;
 		const viewportHeight = window.innerHeight;
@@ -1732,29 +1781,49 @@
 		}, 80);
 	}
 
+	function isElementHiddenOrCollapsed(el: HTMLElement): boolean {
+		const style = window.getComputedStyle(el);
+		if (style.display === "none" || style.visibility === "hidden") {
+			return true;
+		}
+		const rect = el.getBoundingClientRect();
+		return rect.width === 0 || rect.height === 0;
+	}
+
 	function findScrollTarget(target: HTMLElement): HTMLElement {
-		const isUnscrollable = (el: HTMLElement): boolean => {
+		const isUnusable = (el: HTMLElement): boolean => {
 			const style = window.getComputedStyle(el);
-			if (style.position === "fixed" || style.display === "none") {
-				return true;
-			}
-			const rect = el.getBoundingClientRect();
-			return rect.width === 0 && rect.height === 0;
+			return style.position === "fixed" || isElementHiddenOrCollapsed(el);
 		};
 
-		if (!isUnscrollable(target)) {
+		if (!isUnusable(target)) {
 			return target;
 		}
 
 		let current: HTMLElement | null = target.parentElement;
 		while (current && current !== document.body && current !== document.documentElement) {
-			if (!isUnscrollable(current)) {
+			if (!isUnusable(current)) {
 				return current;
 			}
 			current = current.parentElement;
 		}
 
 		return target;
+	}
+
+	function hasScrollableAncestor(element: HTMLElement): boolean {
+		let current: HTMLElement | null = element.parentElement;
+		while (current && current !== document.body && current !== document.documentElement) {
+			const style = window.getComputedStyle(current);
+			const scrollableY =
+				(style.overflowY === "auto" || style.overflowY === "scroll" || style.overflowY === "overlay") &&
+				current.scrollHeight > current.clientHeight + 1;
+			if (scrollableY) {
+				return true;
+			}
+			current = current.parentElement;
+		}
+		return false;
 	}
 
 	function getDocumentTop(element: HTMLElement): number {
@@ -1778,9 +1847,22 @@
 			return;
 		}
 
+		const targetStyle = window.getComputedStyle(target);
+		const targetIsHidden = isElementHiddenOrCollapsed(target);
+
+		// If a fixed-position element is already visible on screen, highlight it in
+		// place instead of scrolling away to an unrelated normal-flow parent.
+		if (targetStyle.position === "fixed" && !targetIsHidden) {
+			target.classList.add(HIGHLIGHT_CLASS);
+			window.setTimeout(() => {
+				target.classList.remove(HIGHLIGHT_CLASS);
+			}, 2000);
+			return;
+		}
+
 		const scrollTarget = findScrollTarget(target);
 		const rect = scrollTarget.getBoundingClientRect();
-		const targetStyle = window.getComputedStyle(scrollTarget);
+		const scrollTargetStyle = window.getComputedStyle(scrollTarget);
 		const hasStickyAncestor = (() => {
 			let cur: HTMLElement | null = scrollTarget;
 			while (cur && cur !== document.documentElement) {
@@ -1792,7 +1874,7 @@
 			return false;
 		})();
 
-		if (hasStickyAncestor || targetStyle.position === "sticky") {
+		if ((hasStickyAncestor || scrollTargetStyle.position === "sticky") && !hasScrollableAncestor(scrollTarget)) {
 			const docTop = getDocumentTop(scrollTarget);
 			window.scrollTo({
 				top: Math.max(0, docTop - Math.round((window.innerHeight - rect.height) / 2)),
@@ -1806,7 +1888,7 @@
 			});
 		}
 
-		const highlightTarget = scrollTarget !== target && target.getBoundingClientRect().height === 0 ? scrollTarget : target;
+		const highlightTarget = targetIsHidden ? scrollTarget : target;
 		highlightTarget.classList.add(HIGHLIGHT_CLASS);
 		window.setTimeout(() => {
 			highlightTarget.classList.remove(HIGHLIGHT_CLASS);

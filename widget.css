@@ -1,5 +1,5 @@
 :host {
-    all: initial;
+    all: initial !important;
     --adcheck-ink: #1a1214;
     --adcheck-ink-soft: #6b4f55;
     --adcheck-panel: rgba(255, 248, 247, 0.96);
@@ -43,16 +43,17 @@
     --adcheck-font-display: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
     --adcheck-font-mono: "SF Mono", "Fira Code", "Cascadia Code", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-    position: fixed;
-    top: 18px;
-    right: 18px;
-    z-index: 2147483647;
+    position: fixed !important;
+    top: 18px !important;
+    right: 18px !important;
+    left: auto !important;
+    z-index: 2147483647 !important;
     font-family: var(--adcheck-font-body);
     font-size: 14px;
     line-height: 1.4;
     color: var(--adcheck-ink);
     color-scheme: light;
-    pointer-events: none;
+    pointer-events: none !important;
     -webkit-font-smoothing: antialiased;
 }
 
@@ -102,8 +103,8 @@
 }
 
 :host(.is-left) {
-    left: 18px;
-    right: auto;
+    left: 18px !important;
+    right: auto !important;
 }
 
 :host([data-theme="dark"]) .adcheck-refresh-btn {
@@ -129,6 +130,17 @@
 :host([data-theme="dark"]) .adcheck-dom-jump {
     border: 1px solid rgba(239, 95, 85, 0.25);
     color: #ff8b82;
+}
+
+:host([data-theme="dark"]) .adcheck-global-expand-btn {
+    border: 1px solid rgba(239, 95, 85, 0.28);
+    background: rgba(239, 95, 85, 0.18);
+    color: #ff9b93;
+}
+
+:host([data-theme="dark"]) .adcheck-global-expand-btn:hover {
+    background: rgba(239, 95, 85, 0.28);
+    color: #ffb8b2;
 }
 
 :host([data-theme="dark"]) .adcheck-result-row.is-clickable:hover {
@@ -269,7 +281,8 @@ p {
 .adcheck-widget-title-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    flex-wrap: wrap;
+    gap: 4px 10px;
 }
 
 .adcheck-widget-title {
@@ -841,13 +854,13 @@ p {
 
 @media (max-width: 520px) {
     :host {
-        top: 10px;
-        right: 10px;
+        top: 10px !important;
+        right: 10px !important;
     }
 
     :host(.is-left) {
-        left: 10px;
-        right: auto;
+        left: 10px !important;
+        right: auto !important;
     }
 
     .adcheck-widget {
