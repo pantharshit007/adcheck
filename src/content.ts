@@ -60,6 +60,9 @@
 		networkState: NetworkTabState;
 		deadlineAt: number | null;
 		root: HTMLDivElement | null;
+		shadowRoot: ShadowRoot | null;
+		colorSchemeMedia: MediaQueryList | null;
+		colorSchemeListener: (() => void) | null;
 		deadlineHandle: number | null;
 		pollHandle: number | null;
 		rowHints: Record<string, string>;
@@ -81,6 +84,9 @@
 		networkState: AdCheckShared.createEmptyTabState(),
 		deadlineAt: null,
 		root: null,
+		shadowRoot: null,
+		colorSchemeMedia: null,
+		colorSchemeListener: null,
 		deadlineHandle: null,
 		pollHandle: null,
 		rowHints: {},
@@ -1026,14 +1032,150 @@
 		});
 	}
 
-	function ensureWidget(): void {
-		if (state.root) {
+	function attachWidgetStyles(shadow: ShadowRoot): void {
+		const css = typeof AdCheckShared.WIDGET_CSS === "string" ? AdCheckShared.WIDGET_CSS : "";
+		if (!css) {
 			return;
 		}
 
-		const root = document.createElement("div");
-		root.id = ROOT_ID;
-		root.innerHTML = `
+		try {
+			if (typeof CSSStyleSheet !== "undefined" && "adoptedStyleSheets" in shadow) {
+				const sheet = new CSSStyleSheet();
+				sheet.replaceSync(css);
+				shadow.adoptedStyleSheets = [sheet];
+				return;
+			}
+		} catch {
+			// Fall back to a <style> tag inside the shadow root if adoptedStyleSheets is unavailable.
+		}
+
+		const style = document.createElement("style");
+		style.textContent = css;
+		shadow.appendChild(style);
+	}
+
+	function parseColorLuminance(color: string): number | null {
+		const match = color.match(/rgba?\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)(?:\s*,\s*(\d+(?:\.\d+)?))?\s*\)/i);
+		if (!match) {
+			return null;
+		}
+
+		const alpha = match[4] !== undefined ? Number.parseFloat(match[4]) : 1;
+		if (!Number.isFinite(alpha) || alpha <= 0.05) {
+			return null;
+		}
+
+		const red = Number.parseFloat(match[1]);
+		const green = Number.parseFloat(match[2]);
+		const blue = Number.parseFloat(match[3]);
+		return (0.299 * red + 0.587 * green + 0.114 * blue) / 255;
+	}
+
+	function isPageDarkBackground(): boolean {
+		if (typeof window.getComputedStyle !== "function") {
+			return false;
+		}
+
+		const candidates: (Element | null | undefined)[] = [document.body, document.documentElement];
+		for (const candidate of candidates) {
+			if (!candidate) {
+				continue;
+			}
+			try {
+				const luminance = parseColorLuminance(window.getComputedStyle(candidate).backgroundColor);
+				if (luminance !== null) {
+					return luminance < 0.45;
+				}
+			} catch {
+				// Ignore inaccessible computed styles.
+			}
+		}
+
+		return false;
+	}
+
+	function resolveWidgetTheme(preference: AdCheckShared.WidgetTheme): "light" | "dark" {
+		if (preference === "light" || preference === "dark") {
+			return preference;
+		}
+
+		if (isPageDarkBackground()) {
+			return "dark";
+		}
+
+		if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+			return "dark";
+		}
+
+		return "light";
+	}
+
+	function nextWidgetTheme(current: AdCheckShared.WidgetTheme): AdCheckShared.WidgetTheme {
+		if (current === "auto") {
+			return "dark";
+		}
+		if (current === "dark") {
+			return "light";
+		}
+		return "auto";
+	}
+
+	function getThemeButtonMeta(preference: AdCheckShared.WidgetTheme, resolved: "light" | "dark"): {
+		icon: string;
+		label: string;
+	} {
+		if (preference === "dark") {
+			return { icon: "☾", label: "Theme: Dark (click to switch to Light)" };
+		}
+		if (preference === "light") {
+			return { icon: "☀", label: "Theme: Light (click to switch to Auto)" };
+		}
+		return {
+			icon: "◐",
+			label: `Theme: Auto (${resolved === "dark" ? "Dark" : "Light"} — click to switch to Dark)`,
+		};
+	}
+
+	function bindColorSchemeListener(): void {
+		unbindColorSchemeListener();
+		if (typeof window.matchMedia !== "function") {
+			return;
+		}
+
+		const media = window.matchMedia("(prefers-color-scheme: dark)");
+		const listener = () => {
+			if (state.settings.widgetTheme === "auto") {
+				renderWidget();
+			}
+		};
+
+		if (typeof media.addEventListener === "function") {
+			media.addEventListener("change", listener);
+			state.colorSchemeMedia = media;
+			state.colorSchemeListener = listener;
+		}
+	}
+
+	function unbindColorSchemeListener(): void {
+		if (state.colorSchemeMedia && state.colorSchemeListener && typeof state.colorSchemeMedia.removeEventListener === "function") {
+			state.colorSchemeMedia.removeEventListener("change", state.colorSchemeListener);
+		}
+		state.colorSchemeMedia = null;
+		state.colorSchemeListener = null;
+	}
+
+	function ensureWidget(): void {
+		if (state.root && state.shadowRoot) {
+			return;
+		}
+
+		const host = document.createElement("div");
+		host.id = ROOT_ID;
+		const shadow = host.attachShadow({ mode: "open" });
+		attachWidgetStyles(shadow);
+
+		const container = document.createElement("div");
+		container.innerHTML = `
       <div class="adcheck-widget">
         <button class="adcheck-pull-tab" id="adcheckToggleTab" type="button" aria-label="Show or hide AdCheck">
           <span>Open</span>
@@ -1049,6 +1191,15 @@
             </div>
             <div class="adcheck-widget-actions">
               <button
+                class="adcheck-refresh-btn adcheck-theme-toggle-btn"
+                id="adcheckThemeToggleButton"
+                type="button"
+                aria-label="Switch widget theme"
+                title="Theme: Auto"
+              >
+                ◐
+              </button>
+              <button
                 class="adcheck-refresh-btn adcheck-side-toggle-btn"
                 id="adcheckSideToggleButton"
                 type="button"
@@ -1062,18 +1213,26 @@
           </header>
           <div class="adcheck-group-list" id="adcheckResults"></div>
         </div>
-        <div class="adcheck-info-tooltip-layer" id="adcheckInfoTooltip" aria-hidden="true"></div>
       </div>
+      <div class="adcheck-info-tooltip-layer" id="adcheckInfoTooltip" aria-hidden="true"></div>
     `;
-		document.documentElement.appendChild(root);
-		state.root = root;
+
+		while (container.firstChild) {
+			shadow.appendChild(container.firstChild);
+		}
+
+		document.documentElement.appendChild(host);
+		state.root = host;
+		state.shadowRoot = shadow;
 		state.infoTooltipEl = ensureInfoTooltipLayer();
+		bindColorSchemeListener();
 		bindWidgetEvents();
 		renderWidget();
 	}
 
 	function teardownWidget(): void {
 		stopSitePicker();
+		unbindColorSchemeListener();
 
 		if (state.deadlineHandle) {
 			window.clearTimeout(state.deadlineHandle);
@@ -1095,10 +1254,8 @@
 			state.root = null;
 		}
 
-		if (state.infoTooltipEl) {
-			state.infoTooltipEl.remove();
-			state.infoTooltipEl = null;
-		}
+		state.shadowRoot = null;
+		state.infoTooltipEl = null;
 	}
 
 	function syncPollingState(): void {
@@ -1129,14 +1286,17 @@
 	}
 
 	function renderWidget(): void {
-		if (!state.root || !state.settings.enabled) {
+		if (!state.root || !state.shadowRoot || !state.settings.enabled) {
 			return;
 		}
 
+		const resolvedTheme = resolveWidgetTheme(state.settings.widgetTheme);
 		const signature = JSON.stringify({
 			overrideError,
 			collapsed: state.settings.widgetCollapsed,
 			widgetSide: state.settings.widgetSide,
+			widgetTheme: state.settings.widgetTheme,
+			resolvedTheme,
 			hints: state.rowHints,
 			snapshot: {
 				bundles: state.snapshot.bundles,
@@ -1167,18 +1327,26 @@
 			renderWindowGlobalsGroup(state.snapshot.windowGlobals),
 		].join("");
 
-		const widget = state.root.querySelector<HTMLElement>(".adcheck-widget");
-		const results = state.root.querySelector<HTMLElement>("#adcheckResults");
-		const badge = state.root.querySelector<HTMLElement>("#adcheckStatusBadge");
-		const toggleLabel = state.root.querySelector<HTMLElement>("#adcheckToggleTab span");
+		const widget = state.shadowRoot.querySelector<HTMLElement>(".adcheck-widget");
+		const results = state.shadowRoot.querySelector<HTMLElement>("#adcheckResults");
+		const badge = state.shadowRoot.querySelector<HTMLElement>("#adcheckStatusBadge");
+		const toggleLabel = state.shadowRoot.querySelector<HTMLElement>("#adcheckToggleTab span");
+		const themeButton = state.shadowRoot.querySelector<HTMLButtonElement>("#adcheckThemeToggleButton");
 
 		hideInfoTooltip();
 		widget?.classList.toggle("is-collapsed", state.settings.widgetCollapsed);
 		if (results) {
-			results.innerHTML = (overrideError ? `<p role="alert">${escapeHtml(overrideError)}</p>` : "") + sections;
+			results.innerHTML = (overrideError ? `<p class="adcheck-override-alert" role="alert">${escapeHtml(overrideError)}</p>` : "") + sections;
 		}
 		state.root.classList.toggle("is-left", state.settings.widgetSide === "left");
 		state.root.classList.toggle("is-right", state.settings.widgetSide !== "left");
+		state.root.dataset.theme = resolvedTheme;
+		if (themeButton) {
+			const meta = getThemeButtonMeta(state.settings.widgetTheme, resolvedTheme);
+			themeButton.textContent = meta.icon;
+			themeButton.title = meta.label;
+			themeButton.setAttribute("aria-label", meta.label);
+		}
 		if (badge) {
 			const passing = countPassingChecks();
 			const total = countTotalChecks();
@@ -1358,43 +1526,49 @@
 	}
 
 	function bindWidgetEvents(): void {
-		if (!state.root) {
+		if (!state.shadowRoot) {
 			return;
 		}
 
-		state.root
+		state.shadowRoot
 			.querySelector<HTMLButtonElement>("#adcheckRefreshButton")
 			?.addEventListener("click", () => {
 				void runChecks(true);
 			});
 
-		state.root
+		state.shadowRoot
 			.querySelector<HTMLButtonElement>("#adcheckToggleTab")
 			?.addEventListener("click", () => {
 				void persistCollapsedState(!state.settings.widgetCollapsed);
 			});
 
-		state.root
+		state.shadowRoot
 			.querySelector<HTMLButtonElement>("#adcheckSideToggleButton")
 			?.addEventListener("click", () => {
 				void persistWidgetSide(state.settings.widgetSide === "left" ? "right" : "left");
 			});
 
-		state.root.addEventListener("pointerover", handleInfoTooltipEvent);
-		state.root.addEventListener("pointerout", handleInfoTooltipEvent);
-		state.root.addEventListener("focusin", handleInfoTooltipEvent);
-		state.root.addEventListener("focusout", handleInfoTooltipEvent);
+		state.shadowRoot
+			.querySelector<HTMLButtonElement>("#adcheckThemeToggleButton")
+			?.addEventListener("click", () => {
+				void persistWidgetTheme(nextWidgetTheme(state.settings.widgetTheme));
+			});
+
+		state.shadowRoot.addEventListener("pointerover", handleInfoTooltipEvent);
+		state.shadowRoot.addEventListener("pointerout", handleInfoTooltipEvent);
+		state.shadowRoot.addEventListener("focusin", handleInfoTooltipEvent);
+		state.shadowRoot.addEventListener("focusout", handleInfoTooltipEvent);
 		window.addEventListener("scroll", scheduleInfoTooltipReposition, true);
 		window.addEventListener("resize", scheduleInfoTooltipReposition);
 	}
 
 	function bindResultEvents(): void {
-		if (!state.root) {
+		if (!state.shadowRoot) {
 			return;
 		}
 
 		for (const button of Array.from(
-			state.root.querySelectorAll<HTMLButtonElement>("[data-dom-id]"),
+			state.shadowRoot.querySelectorAll<HTMLButtonElement>("[data-dom-id]"),
 		)) {
 			button.addEventListener("click", (event: Event) => {
 				event.stopPropagation();
@@ -1402,7 +1576,7 @@
 			});
 		}
 
-		for (const row of Array.from(state.root.querySelectorAll<HTMLElement>("[data-dom-result]"))) {
+		for (const row of Array.from(state.shadowRoot.querySelectorAll<HTMLElement>("[data-dom-result]"))) {
 			row.addEventListener("click", () => {
 				void navigateToDomId(row.dataset.domResult ?? "");
 			});
@@ -1466,11 +1640,12 @@
 	}
 
 	function ensureInfoTooltipLayer(): HTMLDivElement | null {
-		const existing = document.getElementById("adcheckInfoTooltip");
+		if (!state.shadowRoot) {
+			return null;
+		}
+
+		const existing = state.shadowRoot.getElementById("adcheckInfoTooltip");
 		if (existing instanceof HTMLDivElement) {
-			if (existing.parentElement !== document.documentElement) {
-				document.documentElement.appendChild(existing);
-			}
 			return existing;
 		}
 
@@ -1478,7 +1653,7 @@
 		tooltipEl.id = "adcheckInfoTooltip";
 		tooltipEl.className = "adcheck-info-tooltip-layer";
 		tooltipEl.setAttribute("aria-hidden", "true");
-		document.documentElement.appendChild(tooltipEl);
+		state.shadowRoot.appendChild(tooltipEl);
 		return tooltipEl;
 	}
 
@@ -1557,6 +1732,41 @@
 		}, 80);
 	}
 
+	function findScrollTarget(target: HTMLElement): HTMLElement {
+		const isUnscrollable = (el: HTMLElement): boolean => {
+			const style = window.getComputedStyle(el);
+			if (style.position === "fixed" || style.display === "none") {
+				return true;
+			}
+			const rect = el.getBoundingClientRect();
+			return rect.width === 0 && rect.height === 0;
+		};
+
+		if (!isUnscrollable(target)) {
+			return target;
+		}
+
+		let current: HTMLElement | null = target.parentElement;
+		while (current && current !== document.body && current !== document.documentElement) {
+			if (!isUnscrollable(current)) {
+				return current;
+			}
+			current = current.parentElement;
+		}
+
+		return target;
+	}
+
+	function getDocumentTop(element: HTMLElement): number {
+		let top = 0;
+		let current: HTMLElement | null = element;
+		while (current) {
+			top += current.offsetTop;
+			current = current.offsetParent as HTMLElement | null;
+		}
+		return top;
+	}
+
 	async function navigateToDomId(domId: string): Promise<void> {
 		if (!domId) {
 			return;
@@ -1568,14 +1778,38 @@
 			return;
 		}
 
-		target.scrollIntoView({
-			behavior: "smooth",
-			block: "center",
-			inline: "nearest",
-		});
-		target.classList.add(HIGHLIGHT_CLASS);
+		const scrollTarget = findScrollTarget(target);
+		const rect = scrollTarget.getBoundingClientRect();
+		const targetStyle = window.getComputedStyle(scrollTarget);
+		const hasStickyAncestor = (() => {
+			let cur: HTMLElement | null = scrollTarget;
+			while (cur && cur !== document.documentElement) {
+				if (window.getComputedStyle(cur).position === "sticky") {
+					return true;
+				}
+				cur = cur.parentElement;
+			}
+			return false;
+		})();
+
+		if (hasStickyAncestor || targetStyle.position === "sticky") {
+			const docTop = getDocumentTop(scrollTarget);
+			window.scrollTo({
+				top: Math.max(0, docTop - Math.round((window.innerHeight - rect.height) / 2)),
+				behavior: "smooth",
+			});
+		} else {
+			scrollTarget.scrollIntoView({
+				behavior: "smooth",
+				block: "center",
+				inline: "nearest",
+			});
+		}
+
+		const highlightTarget = scrollTarget !== target && target.getBoundingClientRect().height === 0 ? scrollTarget : target;
+		highlightTarget.classList.add(HIGHLIGHT_CLASS);
 		window.setTimeout(() => {
-			target.classList.remove(HIGHLIGHT_CLASS);
+			highlightTarget.classList.remove(HIGHLIGHT_CLASS);
 		}, 2000);
 	}
 
@@ -1613,6 +1847,25 @@
 		const merged = {
 			...state.settings,
 			widgetSide: nextSide,
+		};
+
+		try {
+			await chrome.storage.sync.set({
+				[AdCheckShared.STORAGE_KEY]: merged,
+			});
+		} catch (error: unknown) {
+			if (isExtensionContextInvalidatedError(error)) {
+				return;
+			}
+
+			throw error;
+		}
+	}
+
+	async function persistWidgetTheme(nextTheme: Settings["widgetTheme"]): Promise<void> {
+		const merged = {
+			...state.settings,
+			widgetTheme: nextTheme,
 		};
 
 		try {

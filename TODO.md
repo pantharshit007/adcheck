@@ -6,7 +6,7 @@ Incremental roadmap ordered from quick wins to larger features, with **Shadow DO
 
 ## Priority Next
 
-- [ ] **#7 — Shadow DOM isolation for the widget + Dark Mode support** (`src/content.ts`, `styles.css`, `manifest.json`)
+- [x] **#7 — Shadow DOM isolation for the widget + Dark Mode support** (`src/content.ts`, `widget.css`, `page.css`, `manifest.json`)
   - Mount the floating widget inside a Shadow DOM root with `all: initial` on the host so host-page CSS resets, fonts, and `!important` rules can no longer break widget layout or button alignment.
   - Add clean Light / Dark / Auto theme support for dark-mode websites once isolated.
 
