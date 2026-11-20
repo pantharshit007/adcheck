@@ -92,9 +92,13 @@
     void syncActionIcons();
   });
 
-  chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
     // Title, favicon, and loading-state updates cannot change blocking scope.
-    if (changeInfo.url) void syncBlockedRouteRules();
+    const url = changeInfo.url;
+    if (url) {
+      whenTrackingReady(() => updateTabPage(tabId, url));
+      void syncBlockedRouteRules();
+    }
     void syncActionIcons();
   });
 
@@ -183,13 +187,13 @@
       try {
         const openTabs = await chrome.tabs.query({});
         for (const tab of openTabs) {
-          try { if (typeof tab.id === "number") tabHosts.set(tab.id, new URL(tab.url ?? "").hostname); } catch { /* Non-web tab. */ }
+          if (typeof tab.id === "number" && tab.url) updateTabPage(tab.id, tab.url);
         }
       } catch (error) { console.warn("AdCheck could not read open tabs:", error); }
     }
     for (const tabId of tabStateCache.keys()) {
-      if (!tabHosts.has(tabId)) clearTabTracking(tabId);
-      else if (!settingsCache.current.enabled || !settingsCache.current.bundles.length || settingsCache.current.ignoredDomains.some(entry => AdCheckShared.matchesIgnoredDomain(entry, tabHosts.get(tabId)!))) clearTabTracking(tabId, false);
+      if (!tabPages.has(tabId)) clearTabTracking(tabId);
+      else if (!trackingEnabled(tabId)) clearTabTracking(tabId, false);
     }
     markTrackingReady();
 		return settingsCache.current;
@@ -338,11 +342,9 @@
     const dnr = chrome.declarativeNetRequest;
     const settings = settingsCache.current;
     const tabs = await chrome.tabs.query({});
-    const tabHost = (tab: chrome.tabs.Tab): string => { try { return new URL(tab.url ?? "").hostname; } catch { return ""; } };
-    const isIgnored = (hostname: string) => settings.ignoredDomains.some(entry => AdCheckShared.matchesIgnoredDomain(entry, hostname));
     const ids = (list: chrome.tabs.Tab[]) => list.flatMap(tab => typeof tab.id === "number" ? [tab.id] : []);
-    // Rules apply on every site except tabs on ignored domains.
-    const ignoredTabIds = ids(tabs.filter(tab => { const h = tabHost(tab); return !!h && isIgnored(h); }));
+    // Rules apply on every site except tabs on ignored pages.
+    const ignoredTabIds = ids(tabs.filter(tab => isIgnoredPage(parsePageUrl(tab.pendingUrl ?? tab.url), settings)));
     const existing = await dnr.getSessionRules();
     const legacy = await dnr.getDynamicRules();
     // Remove older dynamic rules; AdCheck now installs session rules only.
@@ -601,12 +603,12 @@
   const notificationTimers = new Map<number, ReturnType<typeof setTimeout>>();
   const storageQueues = new Map<number, Promise<void>>();
   const navigationRequests = new Map<number, string>();
-  const tabHosts = new Map<number, string>();
+  const tabPages = new Map<number, URL>();
 
   function clearTabTracking(tabId: number, clearNavigation = true): void {
     const hadState = tabStateCache.delete(tabId);
     if (hadState || storageQueues.has(tabId)) queueStorage(tabId, () => chrome.storage.session.remove(AdCheckShared.tabStateStorageKey(tabId)));
-    if (clearNavigation) { navigationRequests.delete(tabId); tabHosts.delete(tabId); }
+    if (clearNavigation) { navigationRequests.delete(tabId); tabPages.delete(tabId); }
     clearTimeout(notificationTimers.get(tabId));
     notificationTimers.delete(tabId);
     notifyPending.delete(tabId);
@@ -615,9 +617,34 @@
     }
   }
 
+  function parsePageUrl(value: string | undefined): URL | undefined {
+    if (!value) return undefined;
+    try {
+      const url = new URL(value);
+      if (url.protocol === "http:" || url.protocol === "https:") return url;
+    } catch { /* The tab does not have a valid URL. */ }
+    return undefined;
+  }
+
+  function isIgnoredPage(page: URL | undefined, settings: Settings = settingsCache.current): boolean {
+    return !!page && settings.ignoredDomains.some(entry =>
+      AdCheckShared.matchesIgnoredDomain(entry, page.hostname, page.href)
+    );
+  }
+
+  function updateTabPage(tabId: number, url: string): boolean {
+    const wasIgnored = isIgnoredPage(tabPages.get(tabId));
+    const page = parsePageUrl(url);
+    if (page) tabPages.set(tabId, page);
+    else tabPages.delete(tabId);
+    const isIgnored = isIgnoredPage(page);
+    if (isIgnored && !wasIgnored) clearTabTracking(tabId, false);
+    return wasIgnored !== isIgnored;
+  }
+
   function trackingEnabled(tabId: number): boolean {
     return settingsCache.current.enabled && settingsCache.current.bundles.length > 0 &&
-      !settingsCache.current.ignoredDomains.some(entry => AdCheckShared.matchesIgnoredDomain(entry, tabHosts.get(tabId) ?? ""));
+      !isIgnoredPage(tabPages.get(tabId));
   }
 
   function queueStorage(tabId: number, operation: () => Promise<void>): void {
@@ -653,20 +680,16 @@
   function handleBeforeRequest(details: WebRequestLike): void {
     if (details.tabId < 0) return;
     if (details.type === "main_frame") {
-      const previousHost = tabHosts.get(details.tabId);
+      const ignoreChanged = updateTabPage(details.tabId, details.url);
       if (navigationRequests.get(details.tabId) !== details.requestId) {
-        clearTabTracking(details.tabId);
+        clearTabTracking(details.tabId, false);
         navigationRequests.set(details.tabId, details.requestId);
         void updateActionBadge(details.tabId, false).catch(() => {});
       }
-      let hostname = "";
-      try { hostname = new URL(details.url).hostname; } catch { /* Keep empty. */ }
-      tabHosts.set(details.tabId, hostname);
       // Refresh ignored-tab exclusions before the new document starts requesting
       // subresources, rather than waiting for tabs.onUpdated.
       const settings = settingsCache.current;
-      const affectsScope = (host: string | undefined) => !!host && settings.ignoredDomains.some(entry => AdCheckShared.matchesIgnoredDomain(entry, host));
-      if (settings.enabled && settings.blockedRoutesEnabled && previousHost !== hostname && (affectsScope(previousHost) || affectsScope(hostname))) void syncBlockedRouteRules();
+      if (settings.enabled && settings.blockedRoutesEnabled && ignoreChanged) void syncBlockedRouteRules();
       return;
     }
     // Retain every script (redacted and bounded) so the widget can re-match

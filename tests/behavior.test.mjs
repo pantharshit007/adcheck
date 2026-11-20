@@ -141,6 +141,37 @@ test('blocked routes apply on all sites except ignored domains', async () => {
   assert.equal(f.api.getStatus()[1].message, 'This rule is unchecked.');
 });
 
+test('URL ignore rules control tracking and blocking across same-site navigation', async () => {
+  const f = fixture();
+  const article = 'https://publisher.test/article';
+  const feed = 'https://publisher.test/feed.XML?edition=1';
+  let url = article;
+  f.chrome.tabs.query = async () => [{id: 1, url}];
+  Object.assign(f.api.settingsCache.current, {
+    enabled: true,
+    blockedRoutesEnabled: true,
+    ignoredDomains: [String.raw`/\.xml(?:\?.*)?$/i`],
+    blockedRoutes: [{value: 'ads.js', enabled: true}],
+  });
+  f.listeners.before(request('article', {type: 'main_frame', url: article}));
+  f.listeners.before(request('article-script'));
+  assert.equal(f.api.pendingRequests.size, 1);
+
+  url = feed;
+  f.listeners.updated(1, {url});
+  await f.api.syncBlockedRouteRules();
+  assert.deepEqual([...f.rules()[0].condition.excludedTabIds], [1]);
+  f.listeners.before(request('feed-script'));
+  assert.equal(f.api.pendingRequests.size, 0);
+
+  url = article;
+  f.listeners.updated(1, {url});
+  await f.api.syncBlockedRouteRules();
+  assert.equal(f.rules()[0].condition.excludedTabIds, undefined);
+  f.listeners.before(request('article-script-again'));
+  assert.equal(f.api.pendingRequests.size, 1);
+});
+
 test('DNR rejects unsupported regex and flags while retaining valid rules; ignore and pause apply', async () => {
   const f = fixture(); Object.assign(f.api.settingsCache.current, {enabled: true, blockedRoutes: [{value: 'ads.js', enabled: true}, {value: '/(?=bad)/', enabled: true}, {value: '/ads/g', enabled: true}]});
   await f.api.syncBlockedRouteRules();
